@@ -30,9 +30,43 @@ export type Mandate = {
   escrow_remaining_wei: string;
   strikes: number;
   constraint_note: string;
+  window_note?: string;
+  offer_id?: string;
   status: MandateStatus;
   revoke_armed_at: number;
   review_ids: string[];
+};
+
+export type OperatorProfile = {
+  operator: string;
+  handle: string;
+  bio: string;
+  specialties: string[];
+  rate_hint_wei: string;
+  portfolio: string[];
+  record?: OperatorRecord;
+};
+
+export type OfferStatus = "OPEN" | "AGREED" | "FUNDED" | "WITHDRAWN";
+
+export type Offer = {
+  offer_id: string;
+  seq: number;
+  client: string;
+  operator: string;
+  title: string;
+  template: string;
+  brief: string;
+  surfaces: string[];
+  windows: number;
+  rate_wei: string;
+  rounds: number;
+  turn: "client" | "operator";
+  last_editor: "client" | "operator";
+  note: string;
+  status: OfferStatus;
+  accepted_by?: string;
+  mandate_id?: string;
 };
 
 export type AppealRuling = {
@@ -80,6 +114,8 @@ export type OperatorRecord = {
 export type Stats = {
   total_mandates: number;
   total_reviews: number;
+  total_operators: number;
+  total_offers: number;
   escrowed_wei: string;
   paid_out_wei: string;
   refunded_wei: string;
@@ -186,6 +222,26 @@ export async function getStats(): Promise<Stats | null> {
   return raw ? JSON.parse(raw) : null;
 }
 
+export async function getBench(n = 50): Promise<OperatorProfile[]> {
+  const raw = await read("get_bench", [String(n)]);
+  return raw ? JSON.parse(raw) : [];
+}
+
+export async function getOperatorProfile(address: string): Promise<OperatorProfile | null> {
+  const raw = await read("get_operator_profile", [address]);
+  return raw ? JSON.parse(raw) : null;
+}
+
+export async function getOffer(id: string): Promise<Offer | null> {
+  const raw = await read("get_offer", [id]);
+  return raw ? JSON.parse(raw) : null;
+}
+
+export async function getOffersFor(address: string): Promise<Offer[]> {
+  const raw = await read("get_offers_for", [address]);
+  return raw ? JSON.parse(raw) : [];
+}
+
 // ── writes ───────────────────────────────────────────────────────────────────
 
 async function writeAndWait<T>(
@@ -261,4 +317,47 @@ export async function finalizeRevoke(client: Client, mandateId: string) {
 export async function cancelMandate(client: Client, mandateId: string) {
   return writeAndWait<{ mandate_id: string; refunded_wei: string; status: string }>(
     client, "cancel_mandate", [mandateId]);
+}
+
+// ── v0.2: the Bench, offers, window notes ────────────────────────────────────
+
+export async function registerOperator(
+  client: Client, handle: string, bio: string,
+  specialties: string[], rateHintWei: bigint, portfolio: string[],
+): Promise<OperatorProfile | null> {
+  return writeAndWait<OperatorProfile>(client, "register_operator",
+    [handle, bio, JSON.stringify(specialties), rateHintWei.toString(), JSON.stringify(portfolio)]);
+}
+
+export async function proposeOffer(
+  client: Client, operator: string, title: string, template: string,
+  brief: string, surfaces: string[], windows: number, rateWei: bigint, note: string,
+): Promise<Offer | null> {
+  return writeAndWait<Offer>(client, "propose_offer",
+    [operator, title, template, brief, JSON.stringify(surfaces), windows, rateWei.toString(), note]);
+}
+
+export async function counterOffer(
+  client: Client, offerId: string, brief: string, surfaces: string[],
+  windows: number, rateWei: bigint, note: string,
+): Promise<Offer | null> {
+  return writeAndWait<Offer>(client, "counter_offer",
+    [offerId, brief, JSON.stringify(surfaces), windows, rateWei.toString(), note]);
+}
+
+export async function acceptOffer(client: Client, offerId: string): Promise<Offer | null> {
+  return writeAndWait<Offer>(client, "accept_offer", [offerId]);
+}
+
+export async function withdrawOffer(client: Client, offerId: string): Promise<Offer | null> {
+  return writeAndWait<Offer>(client, "withdraw_offer", [offerId]);
+}
+
+export async function retainFromOffer(client: Client, offerId: string, totalWei: bigint): Promise<Mandate | null> {
+  return writeAndWait<Mandate>(client, "retain_from_offer", [offerId], totalWei);
+}
+
+export async function postWindowNote(client: Client, mandateId: string, note: string) {
+  return writeAndWait<{ mandate_id: string; window_note: string }>(
+    client, "post_window_note", [mandateId, note]);
 }

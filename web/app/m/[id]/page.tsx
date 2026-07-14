@@ -4,7 +4,7 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@/lib/wallet";
 import {
-  getMandate, getReviewsFor, acceptMandate, reviewWindow, appealRuling,
+  getMandate, getReviewsFor, acceptMandate, reviewWindow, appealRuling, postWindowNote,
   finalizeRevoke, cancelMandate, genFromWei, shortAddr, appealBondWei,
   type Mandate, type Review,
 } from "@/lib/retinue";
@@ -18,6 +18,7 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
   const [appealText, setAppealText] = useState("");
@@ -145,6 +146,29 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
             Validators fetch the pinned surfaces live and rule them against the mandate.
             Either party may call it — the operator wants the window paid, the client wants the audit.
           </p>
+
+          {/* layer 5: the operator's note — advocacy, never evidence */}
+          {isOperator && (
+            <div className="inset p-3 mb-3">
+              <label className="spec-key block mb-1">
+                Window note · points the panel at the work — advocacy, never evidence, cleared after the ruling
+              </label>
+              {m.window_note ? (
+                <p className="text-[0.8rem]">“{m.window_note}” <span className="mono text-[0.6rem] muted">— on file for this window</span></p>
+              ) : (
+                <div className="flex gap-2">
+                  <input className="input w-full text-sm" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)}
+                    placeholder="This window's posts are the two dated July 14, below the pinned header." />
+                  <button className="btn-ghost" style={{ fontSize: "0.76rem", whiteSpace: "nowrap" }}
+                    disabled={!!busy || noteDraft.trim().length < 10}
+                    onClick={() => run("note", async () => { await postWindowNote(client, m.mandate_id, noteDraft.trim()); setNoteDraft(""); })}>
+                    {busy === "note" ? "Filing…" : "File note"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           <button onClick={() => run("review", () => reviewWindow(client, m.mandate_id))} disabled={!!busy} className="btn">
             {busy === "review" ? "The panel is reading…" : "Run the review"}
           </button>

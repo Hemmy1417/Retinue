@@ -27,6 +27,8 @@ export function SiteHeader() {
 
       <nav className="hidden md:flex items-center gap-5">
         <Link href="/" className="btn-link">Registry</Link>
+        <Link href="/bench" className="btn-link">Bench</Link>
+        <Link href="/offers" className="btn-link">Offers</Link>
         <Link href="/mandates" className="btn-link">My desk</Link>
         <Link href="/new" className="btn-link">New mandate</Link>
       </nav>
