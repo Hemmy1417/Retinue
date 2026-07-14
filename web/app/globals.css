@@ -48,6 +48,17 @@ html, body {
   overflow-x: clip; /* clip, not hidden — hidden breaks position: sticky */
 }
 
+/* the bench: faint ruled graph paper under everything */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(23, 26, 30, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(23, 26, 30, 0.045) 1px, transparent 1px),
+    linear-gradient(to right, rgba(23, 26, 30, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(23, 26, 30, 0.07) 1px, transparent 1px);
+  background-size: 24px 24px, 24px 24px, 120px 120px, 120px 120px;
+}
+
 /* ── type ───────────────────────────────────────────────────────────────── */
 .display { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.02em; line-height: 1.06; color: var(--ink); }
 .eyebrow { font-family: var(--font-mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.17em; color: var(--muted); }
@@ -120,6 +131,28 @@ textarea.field { resize: vertical; min-height: 4.5rem; }
 .meter > span { height: 8px; flex: 1; border-radius: 2px; background: var(--s3); border: 1px solid var(--line); }
 .meter > .cell-paid { background: var(--release); border-color: var(--release); }
 .meter > .cell-next { background: var(--signal-soft); border-color: var(--signal); }
+
+/* ── specimen card: the worked example on the landing bench ─────────────── */
+.specimen { position: relative; }
+.specimen::after {
+  content: "SPECIMEN"; position: absolute; top: 10px; right: -8px;
+  font-family: var(--font-mono); font-size: 0.56rem; font-weight: 700;
+  letter-spacing: 0.22em; color: var(--signal);
+  border: 1.5px solid var(--signal); border-radius: 3px; padding: 0.18rem 0.5rem;
+  transform: rotate(6deg); background: var(--s1); opacity: 0.9;
+}
+.stamp-in { animation: stamp-in .35s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes stamp-in { from { opacity: 0; transform: scale(1.6) rotate(-4deg); } to { opacity: 1; transform: none; } }
+
+/* spec-sheet rows: label · reading, ruled like a calibration table */
+.spec-row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px dashed var(--line); }
+.spec-row:last-child { border-bottom: none; }
+.spec-key { font-family: var(--font-mono); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.spec-val { font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink); text-align: right; }
+
+/* clause numbers for the trust section */
+.clause { display: flex; gap: 0.9rem; }
+.clause-no { font-family: var(--font-mono); font-weight: 700; font-size: 0.68rem; color: var(--signal); letter-spacing: 0.08em; flex: 0 0 auto; padding-top: 0.15rem; }
 
 /* ── misc ───────────────────────────────────────────────────────────────── */
 .link { color: var(--signal-dim); text-decoration: none; }
