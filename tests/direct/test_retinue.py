@@ -758,3 +758,16 @@ def test_window_note_guards(module, c):
     _as(module, OPERATOR)
     with pytest.raises(module.gl.vm.UserError, match="min 10"):
         c.post_window_note(m["mandate_id"], "short")
+
+
+def test_register_tolerates_cli_decoded_lists(module, c):
+    # the CLI decodes JSON-looking args into real lists before the contract
+    # sees them (the Delphi lesson) — both wire shapes must register
+    _as(module, OPERATOR)
+    p = json.loads(c.register_operator(
+        "wireshape", "Bio long enough to matter here.",
+        ["devtools", "founder-voice"],            # list, as the CLI sends it
+        str(GEN), [SURFACE],
+    ))
+    assert p["specialties"] == ["devtools", "founder-voice"]
+    assert p["portfolio"] == [SURFACE]

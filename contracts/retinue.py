@@ -447,8 +447,11 @@ Respond ONLY with JSON:
         if holder and holder != key:
             raise gl.vm.UserError("that handle is taken")
 
+        # Tolerate both wire shapes: genlayer-js sends the JSON string, the
+        # CLI decodes JSON-looking args into real lists (the Delphi lesson).
         try:
-            tags = json.loads(specialties_json or "[]")
+            tags = specialties_json if isinstance(specialties_json, list) \
+                else json.loads(specialties_json or "[]")
         except Exception:
             raise gl.vm.UserError("specialties_json must be a JSON array of tags")
         if not isinstance(tags, list) or len(tags) > MAX_SPECIALTIES:
@@ -457,7 +460,8 @@ Respond ONLY with JSON:
 
         portfolio = []
         try:
-            arr = json.loads(portfolio_json or "[]")
+            arr = portfolio_json if isinstance(portfolio_json, list) \
+                else json.loads(portfolio_json or "[]")
         except Exception:
             raise gl.vm.UserError("portfolio_json must be a JSON array of URLs")
         for u in (arr if isinstance(arr, list) else []):
