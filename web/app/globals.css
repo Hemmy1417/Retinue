@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+/*
+  Retinue — an inspection panel. Cool instrument grey, near-black ink,
+  international-orange signal, rulings as stamped tags. The aesthetic of a
+  QA bench / audit report: ruled lines, tabular data, no glow, no gradients.
+  Deliberately unlike every sibling: not a terminal, not a broadsheet, not
+  warm paper — a calibrated instrument.
+*/
+
+:root {
+  --bg: #eceef0;          /* instrument grey ground */
+  --s1: #ffffff;          /* panels */
+  --s2: #f4f5f6;          /* insets */
+  --s3: #e6e8ea;          /* chips / hover */
+  --line: #d5d9dd;
+  --line-hard: #9aa1a9;
+
+  --ink: #171a1e;
+  --body: #444b52;
+  --muted: #737b83;
+  --faint: #a6adb4;
+
+  --signal: #e8590c;      /* international orange — the accent */
+  --signal-dim: #c74a08;
+  --signal-soft: rgba(232, 89, 12, 0.08);
+
+  --release: #0f7a45;
+  --warn: #a87900;
+  --constrain: #d9480f;
+  --revoke: #c22633;
+
+  --radius: 6px;
+  --radius-sm: 4px;
+  --font-display: var(--font-archivo), system-ui, sans-serif;
+  --font-body: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-plexmono), ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--body);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip; /* clip, not hidden — hidden breaks position: sticky */
+}
+
+/* ── type ───────────────────────────────────────────────────────────────── */
+.display { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.02em; line-height: 1.06; color: var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.17em; color: var(--muted); }
+.mono { font-family: var(--font-mono); }
+.ink { color: var(--ink); }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.tabular { font-variant-numeric: tabular-nums; }
+.body-strong { color: var(--ink); font-weight: 600; }
+
+/* ── surfaces ───────────────────────────────────────────────────────────── */
+.panel { background: var(--s1); border: 1px solid var(--line); border-radius: var(--radius); }
+.panel-hover:hover, a.panel:hover { border-color: var(--line-hard); }
+.inset { background: var(--s2); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.rule { height: 1px; background: var(--line); border: none; }
+
+/* ── buttons ────────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+  font-family: var(--font-body); font-weight: 650; font-size: 0.86rem;
+  padding: 0.55rem 1.05rem; border-radius: var(--radius-sm); cursor: pointer;
+  transition: background 0.14s ease; white-space: nowrap;
+  background: var(--ink); color: #f6f7f8; border: 1px solid var(--ink);
+}
+.btn:hover { background: #2a2f35; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-signal { background: var(--signal); border-color: var(--signal-dim); }
+.btn-signal:hover { background: var(--signal-dim); }
+.btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+  font-family: var(--font-body); font-weight: 600; font-size: 0.86rem;
+  padding: 0.55rem 1.05rem; border-radius: var(--radius-sm); cursor: pointer;
+  transition: border-color 0.14s ease; background: var(--s1); color: var(--ink);
+  border: 1px solid var(--line-hard);
+}
+.btn-ghost:hover { border-color: var(--signal); color: var(--signal-dim); }
+.btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-danger { background: var(--revoke); border-color: var(--revoke); color: #fff; }
+.btn-link { font-family: var(--font-mono); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); background: none; border: none; cursor: pointer; text-decoration: none; transition: color .14s; }
+.btn-link:hover { color: var(--signal); }
+
+/* ── inputs ─────────────────────────────────────────────────────────────── */
+.field {
+  width: 100%; background: var(--s1); border: 1px solid var(--line-hard); border-radius: var(--radius-sm);
+  color: var(--ink); font-family: var(--font-body); font-size: 0.92rem; padding: 0.6rem 0.8rem;
+  transition: border-color .14s ease;
+}
+.field:focus { outline: none; border-color: var(--signal); }
+.field::placeholder { color: var(--faint); }
+textarea.field { resize: vertical; min-height: 4.5rem; }
+
+/* ── stamps: rulings as inspection tags ─────────────────────────────────── */
+.stamp {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font-family: var(--font-mono); font-weight: 700; font-size: 0.62rem;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  padding: 0.22rem 0.55rem; border-radius: 3px; border: 1.5px solid currentColor;
+  background: var(--s1);
+}
+.stamp-release   { color: var(--release); }
+.stamp-warn      { color: var(--warn); }
+.stamp-constrain { color: var(--constrain); }
+.stamp-revoke    { color: var(--revoke); }
+.stamp-muted     { color: var(--muted); }
+
+.chip { display: inline-flex; align-items: center; gap: 0.35rem; font-family: var(--font-mono); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.09em; padding: 0.22rem 0.55rem; border-radius: 3px; background: var(--s3); color: var(--body); border: 1px solid var(--line); }
+
+/* ── window meter: one cell per review window ───────────────────────────── */
+.meter { display: flex; gap: 3px; }
+.meter > span { height: 8px; flex: 1; border-radius: 2px; background: var(--s3); border: 1px solid var(--line); }
+.meter > .cell-paid { background: var(--release); border-color: var(--release); }
+.meter > .cell-next { background: var(--signal-soft); border-color: var(--signal); }
+
+/* ── misc ───────────────────────────────────────────────────────────────── */
+.link { color: var(--signal-dim); text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.scroll-x { display: flex; gap: 0.5rem; overflow-x: auto; scrollbar-width: none; }
+.scroll-x::-webkit-scrollbar { display: none; }
+@keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.fade-in { animation: fade-in .3s ease both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in { animation: none; }
+}
