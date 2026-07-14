@@ -12,16 +12,15 @@ export function SiteHeader() {
       style={{ background: "var(--s1)", borderBottom: "1px solid var(--line)" }}
     >
       <Link href="/" className="flex items-center gap-2.5">
-        <span
-          className="grid place-items-center mono"
-          style={{
-            width: 26, height: 26, borderRadius: 4,
-            border: "2px solid var(--signal)", color: "var(--signal)",
-            fontSize: 13, fontWeight: 700,
-          }}
-        >
-          R
-        </span>
+        {/* the calibration mark — the instrument that audits the work */}
+        <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="9" fill="none" stroke="var(--signal)" strokeWidth="2.6" />
+          <line x1="16" y1="2" x2="16" y2="8.5" stroke="var(--ink)" strokeWidth="2.6" strokeLinecap="round" />
+          <line x1="16" y1="23.5" x2="16" y2="30" stroke="var(--ink)" strokeWidth="2.6" strokeLinecap="round" />
+          <line x1="2" y1="16" x2="8.5" y2="16" stroke="var(--ink)" strokeWidth="2.6" strokeLinecap="round" />
+          <line x1="23.5" y1="16" x2="30" y2="16" stroke="var(--ink)" strokeWidth="2.6" strokeLinecap="round" />
+          <circle cx="16" cy="16" r="3.2" fill="var(--signal)" />
+        </svg>
         <span className="display text-lg">Retinue</span>
       </Link>
 
