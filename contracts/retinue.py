@@ -393,15 +393,38 @@ Respond ONLY with JSON:
             "escrow_remaining_wei": str(total),
             "strikes":              0,
             "constraint_note":      "",
-            "status":               "ACTIVE",   # ACTIVE | CONSTRAINED | REVOKE_PENDING | REVOKED | COMPLETED | CANCELLED
+            # PROPOSED until the operator accepts: no review can run and no
+            # ruling can touch the operator's record without their consent —
+            # otherwise anyone could farm adverse rulings onto a stranger's
+            # reputation by naming their address against garbage surfaces.
+            "status":               "PROPOSED",  # PROPOSED | ACTIVE | CONSTRAINED | REVOKE_PENDING | REVOKED | COMPLETED | CANCELLED
             "revoke_armed_at":      0,
-            "review_ids":           [],         # bounded: <= windows_total + appeals
+            "review_ids":           [],          # bounded: <= windows_total + appeals
         }
         self._save_mandate(m)
         self._seq_push(self.client_mandates, client.lower(), mandate_id)
         self._seq_push(self.operator_mandates, op.lower(), mandate_id)
         self.total_mandates = u256(seq + 1)
         self.escrowed_wei = u256(int(self.escrowed_wei) + total)
+        return json.dumps(m)
+
+    @gl.public.write
+    def accept_mandate(self, mandate_id: str) -> str:
+        """
+        Operator consent — the handshake that starts the judging. Until this,
+        no review can run and nothing can be written to the operator's record.
+        Accepting means: the surfaces are mine, the work is live to be judged
+        from here on.
+        """
+        m = self._mandate(mandate_id)
+        sender = str(gl.message.sender_address)
+        self._tick()
+        if sender.lower() != m["operator"].lower():
+            raise gl.vm.UserError("only the named operator may accept a mandate")
+        if m["status"] != "PROPOSED":
+            raise gl.vm.UserError(f"mandate status is {m['status']}, not PROPOSED")
+        m["status"] = "ACTIVE"
+        self._save_mandate(m)
         return json.dumps(m)
 
     @gl.public.write
@@ -417,6 +440,8 @@ Respond ONLY with JSON:
 
         if sender.lower() not in (m["client"].lower(), m["operator"].lower()):
             raise gl.vm.UserError("only the client or the operator may call a review")
+        if m["status"] == "PROPOSED":
+            raise gl.vm.UserError("the operator has not accepted this mandate — nothing can be judged yet")
         if m["status"] not in ("ACTIVE", "CONSTRAINED"):
             raise gl.vm.UserError(f"mandate status is {m['status']} — no review can run")
         if int(m["windows_done"]) >= int(m["windows_total"]):
@@ -646,15 +671,16 @@ Respond ONLY with JSON:
     def cancel_mandate(self, mandate_id: str) -> str:
         """
         Client-only early exit. Remaining escrow returns to the client; the
-        operator keeps every window already earned. ACTIVE/CONSTRAINED only —
-        a pending revoke must go through finalize_revoke's appeal window.
+        operator keeps every window already earned. PROPOSED (never accepted),
+        ACTIVE, or CONSTRAINED only — a pending revoke must go through
+        finalize_revoke's appeal window.
         """
         m = self._mandate(mandate_id)
         sender = str(gl.message.sender_address)
         self._tick()
         if sender.lower() != m["client"].lower():
             raise gl.vm.UserError("only the client may cancel a mandate")
-        if m["status"] not in ("ACTIVE", "CONSTRAINED"):
+        if m["status"] not in ("PROPOSED", "ACTIVE", "CONSTRAINED"):
             raise gl.vm.UserError(f"mandate status is {m['status']} — cannot cancel")
 
         refunded = self._refund_remaining(m)

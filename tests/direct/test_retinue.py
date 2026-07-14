@@ -187,10 +187,14 @@ def _as(module, who, value=0):
     module.gl.message.value = value
 
 
-def _retain(module, c, total=4 * GEN, windows=4, template="retainer"):
+def _retain(module, c, total=4 * GEN, windows=4, template="retainer", accept=True):
     _as(module, CLIENT, value=total)
-    return json.loads(c.retain(OPERATOR, "Example brand blog", template, BRIEF,
-                                json.dumps([SURFACE]), windows))
+    m = json.loads(c.retain(OPERATOR, "Example brand blog", template, BRIEF,
+                             json.dumps([SURFACE]), windows))
+    if accept:
+        _as(module, OPERATOR)
+        m = json.loads(c.accept_mandate(m["mandate_id"]))
+    return m
 
 
 def _review(module, c, mid, ruling="RELEASE", injection="NONE", constraint="", who=OPERATOR):
@@ -249,6 +253,41 @@ def test_retain_validations(module, c):
     with pytest.raises(module.gl.vm.UserError, match="http"):
         _as(module, CLIENT, value=4 * GEN)
         c.retain(OPERATOR, "t", "retainer", BRIEF, json.dumps(["ftp://x"]), 4)
+
+
+# ── operator consent: nothing judges a record its owner didn't sign up for ──
+
+def test_no_review_before_acceptance(module, c):
+    m = _retain(module, c, accept=False)
+    assert m["status"] == "PROPOSED"
+    _as(module, CLIENT)
+    with pytest.raises(module.gl.vm.UserError, match="has not accepted"):
+        c.review_window(m["mandate_id"])
+    # the named operator's record is untouched by an unaccepted mandate
+    rec = json.loads(c.get_operator_record(OPERATOR))
+    assert rec["windows_served"] == 0 and rec["warns"] == 0 and rec["revokes"] == 0
+
+
+def test_only_named_operator_accepts(module, c):
+    m = _retain(module, c, accept=False)
+    _as(module, STRANGER)
+    with pytest.raises(module.gl.vm.UserError, match="only the named operator"):
+        c.accept_mandate(m["mandate_id"])
+    _as(module, OPERATOR)
+    out = json.loads(c.accept_mandate(m["mandate_id"]))
+    assert out["status"] == "ACTIVE"
+    with pytest.raises(module.gl.vm.UserError, match="not PROPOSED"):
+        _as(module, OPERATOR)
+        c.accept_mandate(m["mandate_id"])          # no double-accept
+
+
+def test_cancel_unaccepted_mandate_full_refund(module, c):
+    m = _retain(module, c, accept=False)
+    _as(module, CLIENT)
+    out = json.loads(c.cancel_mandate(m["mandate_id"]))
+    assert out["status"] == "CANCELLED"
+    assert int(out["refunded_wei"]) == 4 * GEN
+    assert _GL._emit.total_to(CLIENT) == 4 * GEN
 
 
 # ── rulings & money ──────────────────────────────────────────────────────────
