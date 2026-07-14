@@ -177,7 +177,8 @@ def c(module):
     module.gl.message.value = 0
     r = module.Retinue()
     for name in ("mandates", "reviews", "client_mandates", "operator_mandates",
-                 "seq_counts", "records"):
+                 "seq_counts", "records", "operators", "handles", "operator_index",
+                 "offers", "offers_by_client", "offers_by_operator"):
         setattr(r, name, module.TreeMap())
     return r
 
@@ -541,3 +542,172 @@ def test_registry_and_reviews_views(module, c):
     rvs = json.loads(c.get_reviews_for(m["mandate_id"]))
     assert len(rvs) == 1 and rvs[0]["ruling"] == "WARN"
     assert json.loads(c.get_mandates_for_operator(OPERATOR))[0]["mandate_id"] == m["mandate_id"]
+
+
+# ── layer 1: the Bench ────────────────────────────────────────────────────────
+
+def _register(module, c, who=OPERATOR, handle="inkwell", bio="Ghostwriter for dev tools.",
+              tags='["devtools", "founder-voice"]', rate=str(GEN), portfolio=None):
+    _as(module, who)
+    pf = portfolio if portfolio is not None else json.dumps([SURFACE])
+    return json.loads(c.register_operator(handle, bio, tags, rate, pf))
+
+
+def test_register_operator_and_bench(module, c):
+    p = _register(module, c)
+    assert p["handle"] == "inkwell"
+    assert p["specialties"] == ["devtools", "founder-voice"]
+    bench = json.loads(c.get_bench("10"))
+    assert len(bench) == 1
+    assert bench[0]["handle"] == "inkwell"
+    assert bench[0]["record"]["windows_served"] == 0     # reputation rides along
+    assert json.loads(c.get_stats())["total_operators"] == 1
+    prof = json.loads(c.get_operator_profile(OPERATOR))
+    assert prof["handle"] == "inkwell" and "record" in prof
+
+
+def test_handle_uniqueness_and_reregister(module, c):
+    _register(module, c)
+    with pytest.raises(module.gl.vm.UserError, match="taken"):
+        _register(module, c, who=STRANGER, handle="inkwell")
+    # same wallet re-registers under a new handle; the old one frees up
+    p2 = _register(module, c, handle="quillside")
+    assert p2["handle"] == "quillside"
+    assert json.loads(c.get_stats())["total_operators"] == 1   # update, not a new row
+    _register(module, c, who=STRANGER, handle="inkwell")       # now claimable
+    assert json.loads(c.get_stats())["total_operators"] == 2
+
+
+def test_register_validations(module, c):
+    with pytest.raises(module.gl.vm.UserError, match="handle must be"):
+        _register(module, c, handle="x")
+    with pytest.raises(module.gl.vm.UserError, match="handle must be"):
+        _register(module, c, handle="bad handle!")
+    with pytest.raises(module.gl.vm.UserError, match="specialties"):
+        _register(module, c, tags='["a","b","c","d","e","f"]')
+    with pytest.raises(module.gl.vm.UserError, match="http"):
+        _register(module, c, portfolio='["ftp://nope"]')
+
+
+# ── layer 2: offers ───────────────────────────────────────────────────────────
+
+def _propose(module, c, rate=GEN, windows=4):
+    _as(module, CLIENT)
+    return json.loads(c.propose_offer(OPERATOR, "Example brand blog", "retainer",
+                                      BRIEF, json.dumps([SURFACE]), windows,
+                                      str(rate), "opening terms"))
+
+
+def test_offer_counter_and_accept(module, c):
+    o = _propose(module, c)
+    assert (o["status"], o["turn"], o["last_editor"]) == ("OPEN", "operator", "client")
+
+    _as(module, OPERATOR)   # operator counters the rate up
+    o = json.loads(c.counter_offer(o["offer_id"], BRIEF, json.dumps([SURFACE]), 4,
+                                   str(GEN * 3 // 2), "my rate is 1.5 per window"))
+    assert (o["rounds"], o["turn"], o["last_editor"]) == (1, "client", "operator")
+
+    _as(module, CLIENT)     # client accepts the operator's terms
+    o = json.loads(c.accept_offer(o["offer_id"]))
+    assert o["status"] == "AGREED" and o["accepted_by"] == "client"
+
+
+def test_offer_turn_enforcement(module, c):
+    o = _propose(module, c)
+    _as(module, CLIENT)     # not the client's turn — they just authored the terms
+    with pytest.raises(module.gl.vm.UserError, match="operator's turn"):
+        c.counter_offer(o["offer_id"], BRIEF, json.dumps([SURFACE]), 4, str(GEN), "no")
+    with pytest.raises(module.gl.vm.UserError, match="operator's turn"):
+        c.accept_offer(o["offer_id"])
+    _as(module, STRANGER)   # not at the table at all
+    with pytest.raises(module.gl.vm.UserError, match="only the offer's"):
+        c.accept_offer(o["offer_id"])
+
+
+def test_offer_rounds_cap(module, c):
+    o = _propose(module, c)
+    parties = [OPERATOR, CLIENT, OPERATOR, CLIENT, OPERATOR]
+    for i, who in enumerate(parties):
+        _as(module, who)
+        if i < 4:
+            o = json.loads(c.counter_offer(o["offer_id"], BRIEF, json.dumps([SURFACE]),
+                                           4, str(GEN), f"round {i+1}"))
+        else:
+            with pytest.raises(module.gl.vm.UserError, match="negotiation cap"):
+                c.counter_offer(o["offer_id"], BRIEF, json.dumps([SURFACE]), 4, str(GEN), "again")
+
+
+def test_retain_from_offer_funds_exactly_and_skips_accept(module, c):
+    o = _propose(module, c)
+    _as(module, OPERATOR)
+    o = json.loads(c.accept_offer(o["offer_id"]))   # operator accepts client's terms
+
+    _as(module, CLIENT, value=3 * GEN)              # wrong total (agreed 4 GEN)
+    with pytest.raises(module.gl.vm.UserError, match="agreed total exactly"):
+        c.retain_from_offer(o["offer_id"])
+
+    _as(module, CLIENT, value=4 * GEN)
+    m = json.loads(c.retain_from_offer(o["offer_id"]))
+    # consent was the negotiation: the mandate starts ACTIVE, no accept step
+    assert m["status"] == "ACTIVE"
+    assert m["offer_id"] == o["offer_id"]
+    assert json.loads(c.get_offer(o["offer_id"]))["status"] == "FUNDED"
+    # and it reviews immediately
+    rv = _review(module, c, m["mandate_id"])
+    assert rv["ruling"] == "RELEASE"
+    assert _GL._emit.total_to(OPERATOR) == GEN
+
+
+def test_retain_from_offer_guards(module, c):
+    o = _propose(module, c)
+    _as(module, CLIENT, value=4 * GEN)              # not AGREED yet
+    with pytest.raises(module.gl.vm.UserError, match="only an AGREED"):
+        c.retain_from_offer(o["offer_id"])
+    _as(module, OPERATOR)
+    o = json.loads(c.accept_offer(o["offer_id"]))
+    _as(module, OPERATOR, value=4 * GEN)            # wrong funder
+    with pytest.raises(module.gl.vm.UserError, match="only the offer's client"):
+        c.retain_from_offer(o["offer_id"])
+    _as(module, CLIENT, value=4 * GEN)
+    c.retain_from_offer(o["offer_id"])
+    _as(module, CLIENT, value=4 * GEN)              # double-fund blocked
+    with pytest.raises(module.gl.vm.UserError, match="only an AGREED"):
+        c.retain_from_offer(o["offer_id"])
+
+
+def test_withdraw_offer_closes_the_table(module, c):
+    o = _propose(module, c)
+    _as(module, OPERATOR)
+    o = json.loads(c.withdraw_offer(o["offer_id"]))
+    assert o["status"] == "WITHDRAWN"
+    _as(module, CLIENT)
+    with pytest.raises(module.gl.vm.UserError, match="table is closed"):
+        c.accept_offer(o["offer_id"])
+    offers = json.loads(c.get_offers_for(CLIENT))
+    assert offers[0]["status"] == "WITHDRAWN"
+
+
+# ── layer 5: the operator's window note ───────────────────────────────────────
+
+def test_window_note_reaches_panel_as_advocacy_then_clears(module, c):
+    m = _retain(module, c)
+    _as(module, OPERATOR)
+    c.post_window_note(m["mandate_id"], "This window's posts are the two dated July 14, below the pinned header.")
+    rv = _review(module, c, m["mandate_id"])
+    panel_input = module.gl.eq_principle.last_prompt
+    assert "OPERATOR'S WINDOW NOTE" in panel_input
+    assert "two dated July 14" in panel_input
+    assert "NOT evidence" in panel_input
+    # cleared after the ruling — every window speaks for itself
+    assert json.loads(c.get_mandate(m["mandate_id"]))["window_note"] == ""
+    assert rv["ruling"] == "RELEASE"
+
+
+def test_window_note_guards(module, c):
+    m = _retain(module, c)
+    _as(module, CLIENT)
+    with pytest.raises(module.gl.vm.UserError, match="only the operator"):
+        c.post_window_note(m["mandate_id"], "the client cannot speak for the work")
+    _as(module, OPERATOR)
+    with pytest.raises(module.gl.vm.UserError, match="min 10"):
+        c.post_window_note(m["mandate_id"], "short")
