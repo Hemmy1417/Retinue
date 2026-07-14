@@ -13,7 +13,7 @@ import { CHAIN, CONTRACT_ADDRESS } from "./config";
 
 export type MandateStatus =
   | "PROPOSED" | "ACTIVE" | "CONSTRAINED"
-  | "REVOKE_PENDING" | "REVOKED" | "COMPLETED" | "CANCELLED";
+  | "REVOKE_PENDING" | "REVOKED" | "COMPLETED" | "CANCEL_PENDING" | "CANCELLED";
 
 export type Mandate = {
   mandate_id: string;
@@ -124,6 +124,7 @@ export type Stats = {
   appeal_bond_bps: number;
   min_appeal_bond_wei: string;
   appeal_window_actions: number;
+  cancel_window_actions: number;
   strikes_to_escalate: number;
 };
 
@@ -317,6 +318,11 @@ export async function finalizeRevoke(client: Client, mandateId: string) {
 export async function cancelMandate(client: Client, mandateId: string) {
   return writeAndWait<{ mandate_id: string; refunded_wei: string; status: string }>(
     client, "cancel_mandate", [mandateId]);
+}
+
+export async function finalizeCancel(client: Client, mandateId: string) {
+  return writeAndWait<{ mandate_id: string; refunded_wei: string; status: string }>(
+    client, "finalize_cancel", [mandateId]);
 }
 
 // ── v0.2: the Bench, offers, window notes ────────────────────────────────────

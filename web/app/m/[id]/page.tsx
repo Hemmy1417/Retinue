@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useWallet } from "@/lib/wallet";
 import {
   getMandate, getReviewsFor, acceptMandate, reviewWindow, appealRuling, postWindowNote,
-  finalizeRevoke, cancelMandate, genFromWei, shortAddr, appealBondWei,
+  finalizeRevoke, cancelMandate, finalizeCancel, genFromWei, shortAddr, appealBondWei,
   type Mandate, type Review,
 } from "@/lib/retinue";
 import { TEMPLATE_META } from "@/lib/config";
@@ -196,13 +196,33 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
+      {/* cancel armed — the operator's window to claim earned work */}
+      {m.status === "CANCEL_PENDING" && (
+        <div className="panel p-4 mt-4" style={{ borderColor: "var(--warn)" }}>
+          <div className="eyebrow mb-1" style={{ color: "var(--warn)" }}>Cancel armed — operator window open</div>
+          <p className="text-sm">
+            The escrow does not move yet. The operator can still run the due review and be paid
+            for delivered work; once the window elapses, anyone can execute the cancel.
+          </p>
+          <button onClick={() => run("finalize-cancel", () => finalizeCancel(client, m.mandate_id))} disabled={!!busy} className="btn-danger mt-3 btn">
+            {busy === "finalize-cancel" ? "Executing…" : `Finalize cancel · return ${genFromWei(m.escrow_remaining_wei)} GEN to client`}
+          </button>
+        </div>
+      )}
+
       {/* client cancel */}
       {isClient && (m.status === "PROPOSED" || m.status === "ACTIVE" || m.status === "CONSTRAINED") && (
         <div className="flex items-center gap-3 mt-4">
           <button onClick={() => run("cancel", () => cancelMandate(client, m.mandate_id))} disabled={!!busy} className="btn-link" style={{ color: "var(--revoke)" }}>
-            {busy === "cancel" ? "Cancelling…" : `Cancel mandate · reclaim ${genFromWei(m.escrow_remaining_wei)} GEN`}
+            {busy === "cancel" ? "Cancelling…" : m.status === "PROPOSED"
+              ? `Cancel mandate · reclaim ${genFromWei(m.escrow_remaining_wei)} GEN`
+              : "Cancel mandate · arms a window first"}
           </button>
-          <span className="mono text-[0.6rem] muted">The operator keeps every window already earned.</span>
+          <span className="mono text-[0.6rem] muted">
+            {m.status === "PROPOSED"
+              ? "Nothing was at stake — instant refund."
+              : "The operator keeps every earned window and can still claim the one in progress."}
+          </span>
         </div>
       )}
 
