@@ -166,3 +166,11 @@ npm install && npm run dev
 An instrument panel: warm-grey graph-paper ground, international-orange signal accent, ruling stamps,
 and a calibration mark for a logo — the tool that audits the work. Deliberately unlike the other
 GenLayer siblings. Injected wallets only (MetaMask, Rabby).
+
+## Signed writes
+
+Contract writes are signed by the **connected wallet's own EIP-1193 provider**: the
+wallet context builds the genlayer-js client with `createClient({ chain, account,
+provider })` and every write routes through it — never an implicit `window.ethereum`
+fallback. A repository-level test (`web/tests/signed-write.test.ts`) proves the
+write path routes `eth_sendTransaction` through that provider with the correct `from`.
