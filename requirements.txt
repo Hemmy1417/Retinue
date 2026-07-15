@@ -1,3 +1,11 @@
+# ── Direct-mode tests (tests/direct/) ────────────────────────────────────────
+# The suite is self-contained — it stubs the genlayer runtime, so it needs
+# nothing but pytest:  python -m pytest tests/direct -q
+pytest>=8.0.0
+
+# ── Deploy, lint & on-chain (gltest) tooling ─────────────────────────────────
+# Not imported by the direct tests. Needed for `genlayer deploy`, the GenVM
+# linter, and any future gltest integration tests against Studio.
 genlayer-py @ git+https://github.com/genlayerlabs/genlayer-py@v0.18
 genlayer-test @ git+https://github.com/genlayerlabs/genlayer-testing-suite@v0.29
 genvm-linter @ git+https://github.com/genlayerlabs/genvm-linter@main
