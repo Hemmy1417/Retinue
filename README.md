@@ -104,8 +104,9 @@ mandate: FUNDED -> ACTIVE (operator consents) -> windows ->
 | `review_window` | write | The panel fetches every pinned surface live and rules the window against the mandate's own words via `gl.eq_principle.prompt_comparative`. |
 | `appeal_ruling` | write, payable | A second panel re-reads the same fetched evidence with the operator's instructions as advocacy; only a strictly better ruling flips. |
 
-An LLM-provider outage degrades a review to `INCONCLUSIVE` - a no-op: nothing paid, no strike, the
-window not consumed.
+An LLM-provider outage - or any malformed panel output missing a ruling - degrades a review to
+`INCONCLUSIVE`: a no-op, nothing paid, no strike, the window not consumed. A broken response can
+never be coerced into an adverse `REVOKE`.
 
 ## Contract
 
@@ -115,7 +116,8 @@ window not consumed.
 | Chain ID | `61999` |
 | RPC | `https://studio.genlayer.com/api` |
 | Explorer | `https://explorer-studio.genlayer.com` |
-| Contract address | [`0x10d2c66C26aeE3b733747A1Dd0BA87Fd1813aF17`](https://studio.genlayer.com/?import-contract=0x10d2c66C26aeE3b733747A1Dd0BA87Fd1813aF17) |
+| Version | `v0.2.1` |
+| Contract address | [`0x9574318cD06d923cf2C15dbb1beE28530EB3fd7e`](https://studio.genlayer.com/?import-contract=0x9574318cD06d923cf2C15dbb1beE28530EB3fd7e) |
 | Source | `contracts/retinue.py` |
 | Owner | None - no admin keys, no constructor arguments, no pooled funds |
 
@@ -186,7 +188,7 @@ solvency  -> the book squared exactly at every step
 ## Repository
 
 ```text
-contracts/retinue.py        The Intelligent Contract (v0.2, deployed)
+contracts/retinue.py        The Intelligent Contract (v0.2.1, deployed)
 tests/direct/               44 direct-mode tests, pytest
 web/                        Next.js frontend (bench, offers, mandates, mandate room, registry)
 ```
