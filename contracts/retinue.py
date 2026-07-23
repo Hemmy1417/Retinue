@@ -18,8 +18,9 @@ import typing
 #
 # Evidence discipline: the deliverable IS the public page. Validators fetch
 # it themselves — the contract never accepts operator-supplied evidence.
-# No wall-clock exists on the GenVM: windows are ordinal checkpoints and the
-# appeal window is measured in protocol actions.
+# Time model by design: windows are ordinal checkpoints and the appeal window is
+# measured in protocol actions, not wall-clock time — supervision stays deterministic
+# with no dependency on an external time oracle.
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -404,7 +405,10 @@ Respond ONLY with JSON:
         )
         out = _parse_json(gl.eq_principle.prompt_comparative(observe, principle))
 
-        ruling = str(out.get("ruling", "REVOKE")).upper()
+        # A missing ruling field degrades to INCONCLUSIVE (the no-op path below),
+        # never coerced into an adverse REVOKE — a malformed panel output must not
+        # drain the operator's window; it holds and is retried.
+        ruling = str(out.get("ruling", "INCONCLUSIVE")).upper()
         if ruling == "INCONCLUSIVE":
             return {"ruling": "INCONCLUSIVE",
                     "summary": _clip(out.get("summary"), 300)}

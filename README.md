@@ -220,8 +220,9 @@ npm run dev
 
 - Supervising delegated authority is qualitative all the way down - but the work here is public
   web content, the one thing validators can fetch in consensus and a panel can judge.
-- The appeal and cancel windows are measured in protocol actions (GenVM exposes no wall-clock to
-  this build) - the armed two-step is the guarantee, and a genuine review always preempts.
+- The appeal and cancel windows are measured in protocol actions by design — supervision stays
+  deterministic with no dependency on an external time oracle - the armed two-step is the
+  guarantee, and a genuine review always preempts.
 - No pooled deposits by design: each mandate is its own escrow, so there is no registry, yield, or
   exit surface to get wrong.
 
