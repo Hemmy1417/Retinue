@@ -114,15 +114,16 @@ export default function Registry() {
           <div className="eyebrow mb-1" style={{ color: "var(--signal)" }}>Three mandates it was built for</div>
           <div className="flex flex-col gap-4 mt-3">
             {([
-              ["Retainer", "The agency runs your blog and socials. The mandate pins voice, topics, cadence, prohibitions — and every window the panel reads what actually went out under your name."],
-              ["Sponsorship", "The influencer posts the placement, pockets the fee, and quietly deletes it two days later. Here the placement is a pinned surface: gone means no more windows pay, and the escrow walks home."],
-              ["Takeover", "A launch-week campaign run by someone else's hands — or an AI agent's. Bounded windows, standing review, and a record of how it behaved when nobody was watching."],
-            ] as [string, string][]).map(([t, d]) => (
+              ["Retainer", "Agencies · Ghostwriters · Content teams", "The agency runs your blog and socials. The mandate pins voice, topics, cadence, prohibitions — and every window the panel reads what actually went out under your name."],
+              ["Sponsorship", "Influencers · Brand deals · Affiliate posts", "The influencer posts the placement, pockets the fee, and quietly deletes it two days later. Here the placement is a pinned surface: gone means no more windows pay, and the escrow walks home."],
+              ["Takeover", "Launch campaigns · AI posting agents", "A launch-week campaign run by someone else's hands — or an AI agent's. Bounded windows, standing review, and a record of how it behaved when nobody was watching."],
+            ] as [string, string, string][]).map(([t, personas, d]) => (
               <div key={t} className="clause">
                 <span className="clause-no">▸</span>
                 <div>
                   <p className="body-strong text-sm">{t}</p>
-                  <p className="text-[0.82rem] leading-relaxed mt-0.5">{d}</p>
+                  <p className="text-[0.68rem] uppercase mt-0.5" style={{ color: "var(--signal)", letterSpacing: "0.05em" }}>{personas}</p>
+                  <p className="text-[0.82rem] leading-relaxed mt-1">{d}</p>
                 </div>
               </div>
             ))}
