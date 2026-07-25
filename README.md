@@ -167,9 +167,10 @@ never be coerced into an adverse `REVOKE`.
   `forfeit_window` - the tranche returns to the client and a miss lands on the record. It reads a
   probe-verified public clock (Cloudflare + Ethereum) and fails closed without one, so nothing
   forfeits without a real, agreed timestamp.
-- **On-chain evidence snapshots** - every review records the panel's canonical `evidence_digest` -
-  a factual fingerprint of exactly what it read that window - and a `sha256` of it, so the evidence
-  behind each ruling is on the record and tamper-evident.
+- **On-chain evidence snapshots** - every review records `evidence_digest`, the reviewing panel's
+  recorded reading of what the surfaces showed that window (a factual fingerprint - not a hash of
+  the raw page), plus a `sha256` of that digest so the stored record is tamper-evident. The evidence
+  behind each ruling is on-chain and can't be quietly rewritten after the fact.
 
 ### New in v0.4 - reputation made load-bearing
 

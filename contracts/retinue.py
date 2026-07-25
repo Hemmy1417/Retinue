@@ -1058,8 +1058,10 @@ Respond ONLY with JSON:
             "confidence":    verdict["confidence"],
             "violations":    verdict["violations"],
             "summary":       verdict["summary"],
-            # v0.3 — immutable evidence snapshot: the panel's recorded fingerprint
-            # of exactly what it read this window, plus a tamper-evident hash.
+            # v0.3 — evidence snapshot: the reviewing panel's RECORDED READING of
+            # what the surfaces showed this window (a factual fingerprint, not a
+            # hash of the raw page), plus a sha256 of that digest so the stored
+            # record is tamper-evident and can't be quietly rewritten later.
             "evidence_digest": verdict.get("evidence_digest", ""),
             "evidence_hash":   hashlib.sha256(verdict.get("evidence_digest", "").encode("utf-8")).hexdigest(),
             "paid_wei":      "0",
