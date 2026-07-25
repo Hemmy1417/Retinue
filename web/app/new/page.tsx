@@ -20,6 +20,7 @@ export default function NewMandate() {
   const [probes, setProbes] = useState<Record<number, Probe>>({});
   const [windows, setWindows] = useState("4");
   const [total, setTotal] = useState("0.4");
+  const [intervalHours, setIntervalHours] = useState("0");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -68,7 +69,9 @@ export default function NewMandate() {
     if (!(Number(total) > 0)) return setErr("Set the retainer total.");
     setBusy(true);
     try {
-      const m = await retain(client, operator.trim(), title.trim(), template, brief.trim(), surf, n, genToWei(total));
+      const ih = Number(intervalHours) || 0;
+      if (ih !== 0 && (ih < 1 || ih > 2160)) { setBusy(false); return setErr("Timed cadence must be 0 (manual) or 1–2160 hours."); }
+      const m = await retain(client, operator.trim(), title.trim(), template, brief.trim(), surf, n, genToWei(total), ih);
       router.push(m?.mandate_id ? `/m/${m.mandate_id}` : "/mandates");
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -144,6 +147,13 @@ export default function NewMandate() {
             <input value={total} onChange={(e) => setTotal(e.target.value)} inputMode="decimal" className="field mono" />
           </Field>
         </div>
+        <Field label="Cadence — hours per window (0 = manual)">
+          <input value={intervalHours} onChange={(e) => setIntervalHours(e.target.value)} inputMode="numeric" className="field mono" />
+          <p className="mono text-[0.66rem] muted mt-1">
+            On a timed cadence, a window the operator lets go stale past its deadline can be
+            forfeited back to you by anyone — the tranche returns and a miss lands on their record.
+          </p>
+        </Field>
         {ratePreview && (
           <p className="mono text-[0.66rem] muted">
             ≈ {ratePreview} GEN per window, released only against a passing review. Unspent escrow returns to you on revoke or cancel.

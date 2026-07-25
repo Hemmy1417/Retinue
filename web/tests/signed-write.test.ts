@@ -120,7 +120,7 @@ describe("Retinue writes are signed by the connected wallet provider", () => {
 
   it("the real acceptMandate action signs through the provider-backed client", async () => {
     const { client, calls } = providerClient();
-    void acceptMandate(client, "m-1").catch(() => {});
+    void acceptMandate(client, "m-1", BigInt("20000000000000000")).catch(() => {});
     await vi.waitFor(
       () => expect(calls.find((c) => c.method === "eth_sendTransaction")).toBeDefined(),
       { timeout: 4000 },

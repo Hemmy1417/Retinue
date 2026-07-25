@@ -116,8 +116,8 @@ never be coerced into an adverse `REVOKE`.
 | Chain ID | `61999` |
 | RPC | `https://studio.genlayer.com/api` |
 | Explorer | `https://explorer-studio.genlayer.com` |
-| Version | `v0.2.1` |
-| Contract address | [`0x9574318cD06d923cf2C15dbb1beE28530EB3fd7e`](https://studio.genlayer.com/?import-contract=0x9574318cD06d923cf2C15dbb1beE28530EB3fd7e) |
+| Version | `v0.3.0` |
+| Contract address | [`0xe5BaeEf5acb2260A6E377492c9f3Dc7403Bf5AFE`](https://studio.genlayer.com/?import-contract=0xe5BaeEf5acb2260A6E377492c9f3Dc7403Bf5AFE) |
 | Source | `contracts/retinue.py` |
 | Owner | None - no admin keys, no constructor arguments, no pooled funds |
 
@@ -154,8 +154,22 @@ never be coerced into an adverse `REVOKE`.
   or appeal instruction deterministically floors the ruling at `CONSTRAIN`.
 - **No same-breath money paths** - REVOKE and cancel both arm and wait out a window; an appeal or
   a due review can preempt them.
-- **Solvency book** - `escrowed / paid_out / refunded` accounting; every closed mandate squares
-  to zero.
+- **Solvency book** - `escrowed / paid_out / refunded / bonds_held` accounting; every closed
+  mandate squares to zero.
+
+### New in v0.3
+
+- **Operator performance bond** - the operator posts a bond (20% of the retainer, min 0.02 GEN)
+  at `accept`. Symmetric skin in the game: it comes home in full on a clean completion, and is
+  slashed to the client on a final `REVOKE` or any window let go stale.
+- **Timed review windows (optional)** - a mandate can pin a wall-clock cadence (`window_interval_hours`).
+  A window the operator lets go stale past its deadline can be forfeited by *anyone* via
+  `forfeit_window` - the tranche returns to the client and a miss lands on the record. It reads a
+  probe-verified public clock (Cloudflare + Ethereum) and fails closed without one, so nothing
+  forfeits without a real, agreed timestamp.
+- **On-chain evidence snapshots** - every review records the panel's canonical `evidence_digest` -
+  a factual fingerprint of exactly what it read that window - and a `sha256` of it, so the evidence
+  behind each ruling is on the record and tamper-evident.
 
 ## Verified end-to-end
 
@@ -188,7 +202,7 @@ solvency  -> the book squared exactly at every step
 ## Repository
 
 ```text
-contracts/retinue.py        The Intelligent Contract (v0.2.1, deployed)
+contracts/retinue.py        The Intelligent Contract (v0.3.0, deployed)
 tests/direct/               44 direct-mode tests, pytest
 web/                        Next.js frontend (bench, offers, mandates, mandate room, registry)
 ```

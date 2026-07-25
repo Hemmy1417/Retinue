@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useWallet } from "@/lib/wallet";
 import {
   getMandate, getReviewsFor, acceptMandate, reviewWindow, appealRuling, postWindowNote,
-  finalizeRevoke, cancelMandate, finalizeCancel, genFromWei, shortAddr, appealBondWei,
+  finalizeRevoke, cancelMandate, finalizeCancel, forfeitWindow, operatorBondRequired,
+  genFromWei, shortAddr, appealBondWei,
   type Mandate, type Review,
 } from "@/lib/retinue";
 import { TEMPLATE_META } from "@/lib/config";
@@ -114,15 +115,45 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
           <div className="eyebrow mb-1" style={{ color: "var(--signal)" }}>Awaiting operator acceptance</div>
           <p className="text-sm">
             Nothing can be judged and nothing touches the operator&apos;s record until they accept.
-            Accepting means: <em>the surfaces are mine — judge the work from here on.</em>
+            Accepting posts a <strong>performance bond of {genFromWei(operatorBondRequired(m).toString())} GEN</strong> (20%
+            of the retainer): it comes home in full on a clean completion, and is slashed to the client on a
+            final revoke or any window let go stale. <em>The surfaces are mine — judge the work from here on.</em>
           </p>
           {isOperator && (
-            <button onClick={() => run("accept", () => acceptMandate(client, m.mandate_id))} disabled={!!busy} className="btn btn-signal mt-3">
-              {busy === "accept" ? "Accepting…" : "Accept the mandate"}
+            <button onClick={() => run("accept", () => acceptMandate(client, m.mandate_id, operatorBondRequired(m)))} disabled={!!busy} className="btn btn-signal mt-3">
+              {busy === "accept" ? "Accepting…" : `Accept & post ${genFromWei(operatorBondRequired(m).toString())} GEN bond`}
             </button>
           )}
         </div>
       )}
+
+      {/* timed cadence + permissionless forfeit */}
+      {Number(m.window_interval_seconds) > 0
+        && ["ACTIVE", "CONSTRAINED", "CANCEL_PENDING"].includes(m.status)
+        && m.windows_done < m.windows_total && (() => {
+        const now = Math.floor(Date.now() / 1000);
+        const dl = Number(m.window_deadline_epoch);
+        const overdue = dl > 0 && now > dl;
+        const hrs = dl > 0 ? Math.max(0, Math.round((dl - now) / 3600)) : 0;
+        return (
+          <div className="panel p-4 mt-4" style={{ borderColor: overdue ? "var(--revoke)" : "var(--constrain)" }}>
+            <div className="eyebrow mb-1">Timed cadence · {Math.round(Number(m.window_interval_seconds) / 3600)}h per window</div>
+            <p className="text-sm">
+              {dl <= 0
+                ? "Deadline not armed yet — run the first review to anchor the clock."
+                : overdue
+                ? "This window is overdue. Anyone can forfeit it — the tranche returns to the client and a miss lands on the operator's record."
+                : `Next window due in ~${hrs}h.`}
+              {m.forfeits_count > 0 && <span className="mono muted"> · {m.forfeits_count} forfeited</span>}
+            </p>
+            {overdue && (
+              <button onClick={() => run("forfeit", () => forfeitWindow(client, m.mandate_id))} disabled={!!busy} className="btn btn-danger mt-3">
+                {busy === "forfeit" ? "Forfeiting…" : `Forfeit window · reclaim ${genFromWei(m.rate_wei)} GEN for client`}
+              </button>
+            )}
+          </div>
+        );
+      })()}
 
       {/* revoke armed */}
       {m.status === "REVOKE_PENDING" && (

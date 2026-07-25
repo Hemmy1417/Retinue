@@ -35,6 +35,11 @@ export type Mandate = {
   status: MandateStatus;
   revoke_armed_at: number;
   review_ids: string[];
+  // v0.3
+  operator_bond_wei: string;
+  window_interval_seconds: number;
+  window_deadline_epoch: number;
+  forfeits_count: number;
 };
 
 export type OperatorProfile = {
@@ -91,6 +96,8 @@ export type Review = {
   confidence: number;
   violations: string[];
   summary: string;
+  evidence_digest?: string;
+  evidence_hash?: string;
   paid_wei: string;
   appealed: boolean;
   appeal_note: string;
@@ -109,6 +116,7 @@ export type OperatorRecord = {
   completed: number;
   appeals_won: number;
   appeals_lost: number;
+  forfeits?: number;
 };
 
 export type Stats = {
@@ -126,6 +134,11 @@ export type Stats = {
   appeal_window_actions: number;
   cancel_window_actions: number;
   strikes_to_escalate: number;
+  // v0.3
+  bonds_held_wei: string;
+  operator_bond_bps: number;
+  min_operator_bond_wei: string;
+  window_interval_hours_range: [number, number];
 };
 
 // ── gen helpers ──────────────────────────────────────────────────────────────
@@ -291,13 +304,31 @@ async function writeAndWait<T>(
 export async function retain(
   client: Client, operator: string, title: string, template: string,
   brief: string, surfaces: string[], windows: number, totalWei: bigint,
+  windowIntervalHours = 0,
 ): Promise<Mandate | null> {
   return writeAndWait<Mandate>(client, "retain",
-    [operator, title, template, brief, JSON.stringify(surfaces), windows], totalWei);
+    [operator, title, template, brief, JSON.stringify(surfaces), windows, windowIntervalHours], totalWei);
 }
 
-export async function acceptMandate(client: Client, mandateId: string): Promise<Mandate | null> {
-  return writeAndWait<Mandate>(client, "accept_mandate", [mandateId]);
+// Operator consent + performance bond. bondWei must equal the required amount
+// (20% of the retainer, min 0.02 GEN) — read it from the PROPOSED mandate.
+export async function acceptMandate(
+  client: Client, mandateId: string, bondWei: bigint,
+): Promise<Mandate | null> {
+  return writeAndWait<Mandate>(client, "accept_mandate", [mandateId], bondWei);
+}
+
+// Permissionless: reclaim a timed window the operator let go stale past its deadline.
+export async function forfeitWindow(client: Client, mandateId: string): Promise<unknown> {
+  return writeAndWait(client, "forfeit_window", [mandateId]);
+}
+
+// The operator bond the contract will require at accept for a given mandate.
+export function operatorBondRequired(m: { rate_wei: string; windows_total: number }): bigint {
+  const exact = BigInt(m.rate_wei) * BigInt(m.windows_total);
+  const pct = (exact * BigInt(2000)) / BigInt(10000);
+  const floor = BigInt("20000000000000000"); // 0.02 GEN
+  return pct > floor ? pct : floor;
 }
 
 export async function reviewWindow(client: Client, mandateId: string): Promise<Review | null> {

@@ -71,6 +71,11 @@ class _Evm:
         return _Proxy
 
 
+# Controllable test wall-clock. 0 = no trusted clock (default — manual mandates
+# never read it); a positive value is served to the contract's TIME_SOURCES.
+_NOW = [0]
+
+
 class _NondetWeb:
     pages = {}          # url -> text
     raise_all = False
@@ -79,6 +84,14 @@ class _NondetWeb:
     def render(cls, url, mode="text"):
         if cls.raise_all or cls.pages.get(url) is _RAISE:
             raise RuntimeError("403 blocked")
+        if _NOW[0] > 0:
+            if "cdn-cgi/trace" in url:
+                return f"fl=1x2\nh=cloudflare.com\nts={_NOW[0]}.000\nvisit_scheme=https\n"
+            if "blockscout" in url:
+                import datetime as _dt
+                t = _dt.datetime.fromtimestamp(_NOW[0], _dt.timezone.utc)
+                return json.dumps([{"height": 1,
+                                    "timestamp": t.strftime("%Y-%m-%dT%H:%M:%S.000000Z")}])
         return cls.pages.get(url, f"stub page for {url}")
 
 
@@ -150,12 +163,14 @@ BRIEF = ("Run the Example brand blog: two posts per window on developer tooling,
          "founder voice, no politics, no token shilling, no giveaways.")
 
 
-def _verdict(ruling="RELEASE", injection="NONE", constraint="", disclosure="N_A"):
+def _verdict(ruling="RELEASE", injection="NONE", constraint="", disclosure="N_A",
+             evidence_digest=""):
     return json.dumps({
         "mandate_compliance": "ON", "presence": "ACTIVE",
         "prohibited_content": "NONE", "injection_attempt": injection,
         "disclosure": disclosure, "ruling": ruling, "confidence": 90,
         "violations": [], "constraint": constraint,
+        "evidence_digest": evidence_digest,
         "summary": "Stub ruling grounded in the fetched surfaces.",
     })
 
@@ -173,6 +188,7 @@ def c(module):
     _EqPrinciple.last_input = ""
     _NondetWeb.pages = {SURFACE: "Post one: shipping notes. Post two: tooling deep-dive."}
     _NondetWeb.raise_all = False
+    _NOW[0] = 0
     module.gl.message.sender_address = CLIENT
     module.gl.message.value = 0
     r = module.Retinue()
@@ -188,12 +204,19 @@ def _as(module, who, value=0):
     module.gl.message.value = value
 
 
-def _retain(module, c, total=4 * GEN, windows=4, template="retainer", accept=True):
+def _op_bond(total, windows):
+    """The operator performance bond the contract requires at accept: 20% of the
+    exact (dust-trimmed) retainer, min 0.02 GEN."""
+    exact = (total // windows) * windows
+    return max(exact * 2000 // 10000, 2 * 10 ** 16)
+
+
+def _retain(module, c, total=4 * GEN, windows=4, template="retainer", accept=True, interval=0):
     _as(module, CLIENT, value=total)
     m = json.loads(c.retain(OPERATOR, "Example brand blog", template, BRIEF,
-                             json.dumps([SURFACE]), windows))
+                             json.dumps([SURFACE]), windows, interval))
     if accept:
-        _as(module, OPERATOR)
+        _as(module, OPERATOR, value=_op_bond(total, windows))
         m = json.loads(c.accept_mandate(m["mandate_id"]))
     return m
 
@@ -232,28 +255,31 @@ def test_retain_records_mandate_and_escrow(module, c):
 def test_retain_validations(module, c):
     _as(module, CLIENT, value=4 * GEN)
     with pytest.raises(module.gl.vm.UserError, match="wallet address"):
-        c.retain("operator", "t", "retainer", BRIEF, json.dumps([SURFACE]), 4)
+        c.retain("operator", "t", "retainer", BRIEF, json.dumps([SURFACE]), 4, 0)
     with pytest.raises(module.gl.vm.UserError, match="must differ"):
         _as(module, CLIENT, value=4 * GEN)
-        c.retain(CLIENT, "t", "retainer", BRIEF, json.dumps([SURFACE]), 4)
+        c.retain(CLIENT, "t", "retainer", BRIEF, json.dumps([SURFACE]), 4, 0)
     with pytest.raises(module.gl.vm.UserError, match="windows must be"):
         _as(module, CLIENT, value=4 * GEN)
-        c.retain(OPERATOR, "t", "retainer", BRIEF, json.dumps([SURFACE]), 1)
+        c.retain(OPERATOR, "t", "retainer", BRIEF, json.dumps([SURFACE]), 1, 0)
     with pytest.raises(module.gl.vm.UserError, match="template"):
         _as(module, CLIENT, value=4 * GEN)
-        c.retain(OPERATOR, "t", "campaign", BRIEF, json.dumps([SURFACE]), 4)
+        c.retain(OPERATOR, "t", "campaign", BRIEF, json.dumps([SURFACE]), 4, 0)
     with pytest.raises(module.gl.vm.UserError, match="min 80"):
         _as(module, CLIENT, value=4 * GEN)
-        c.retain(OPERATOR, "t", "retainer", "too short", json.dumps([SURFACE]), 4)
+        c.retain(OPERATOR, "t", "retainer", "too short", json.dumps([SURFACE]), 4, 0)
     with pytest.raises(module.gl.vm.UserError, match="below minimum"):
         _as(module, CLIENT, value=10 ** 15)
-        c.retain(OPERATOR, "t", "retainer", BRIEF, json.dumps([SURFACE]), 4)
+        c.retain(OPERATOR, "t", "retainer", BRIEF, json.dumps([SURFACE]), 4, 0)
     with pytest.raises(module.gl.vm.UserError, match="1-3"):
         _as(module, CLIENT, value=4 * GEN)
-        c.retain(OPERATOR, "t", "retainer", BRIEF, "[]", 4)
+        c.retain(OPERATOR, "t", "retainer", BRIEF, "[]", 4, 0)
     with pytest.raises(module.gl.vm.UserError, match="http"):
         _as(module, CLIENT, value=4 * GEN)
-        c.retain(OPERATOR, "t", "retainer", BRIEF, json.dumps(["ftp://x"]), 4)
+        c.retain(OPERATOR, "t", "retainer", BRIEF, json.dumps(["ftp://x"]), 4, 0)
+    with pytest.raises(module.gl.vm.UserError, match="timed cadence"):
+        _as(module, CLIENT, value=4 * GEN)
+        c.retain(OPERATOR, "t", "retainer", BRIEF, json.dumps([SURFACE]), 4, 3000)  # 3000h > 90d cap
 
 
 # ── operator consent: nothing judges a record its owner didn't sign up for ──
@@ -271,14 +297,15 @@ def test_no_review_before_acceptance(module, c):
 
 def test_only_named_operator_accepts(module, c):
     m = _retain(module, c, accept=False)
-    _as(module, STRANGER)
+    _as(module, STRANGER, value=_op_bond(4 * GEN, 4))
     with pytest.raises(module.gl.vm.UserError, match="only the named operator"):
         c.accept_mandate(m["mandate_id"])
-    _as(module, OPERATOR)
+    _as(module, OPERATOR, value=_op_bond(4 * GEN, 4))
     out = json.loads(c.accept_mandate(m["mandate_id"]))
     assert out["status"] == "ACTIVE"
+    assert out["operator_bond_wei"] == str(_op_bond(4 * GEN, 4))
     with pytest.raises(module.gl.vm.UserError, match="not PROPOSED"):
-        _as(module, OPERATOR)
+        _as(module, OPERATOR, value=_op_bond(4 * GEN, 4))
         c.accept_mandate(m["mandate_id"])          # no double-accept
 
 
@@ -313,7 +340,9 @@ def test_final_window_absorbs_dust_and_completes(module, c):
     updated = json.loads(c.get_mandate(m["mandate_id"]))
     assert updated["status"] == "COMPLETED"
     assert int(updated["escrow_remaining_wei"]) == 0
-    assert _GL._emit.total_to(OPERATOR) == 4 * GEN + 3     # every wei accounted for
+    # every retainer wei paid out, plus the performance bond home on clean completion
+    assert _GL._emit.total_to(OPERATOR) == 4 * GEN + 3 + _op_bond(4 * GEN + 3, 4)
+    assert updated["operator_bond_wei"] == "0"             # bond settled
     rec = json.loads(c.get_operator_record(OPERATOR))
     assert rec["completed"] == 1
 
@@ -412,7 +441,9 @@ def test_finalize_revoke_after_window_refunds_client(module, c):
     out = json.loads(c.finalize_revoke(m["mandate_id"]))
     assert out["status"] == "REVOKED"
     assert int(out["refunded_wei"]) == 4 * GEN
-    assert _GL._emit.total_to(CLIENT) == 4 * GEN
+    # the operator's bond is slashed to the client on top of the refund
+    assert int(out["bond_slashed_wei"]) == _op_bond(4 * GEN, 4)
+    assert _GL._emit.total_to(CLIENT) == 4 * GEN + _op_bond(4 * GEN, 4)
     assert json.loads(c.get_operator_record(OPERATOR))["revokes"] == 1
 
 
@@ -771,3 +802,118 @@ def test_register_tolerates_cli_decoded_lists(module, c):
     ))
     assert p["specialties"] == ["devtools", "founder-voice"]
     assert p["portfolio"] == [SURFACE]
+
+
+# ── v0.3 — operator performance bond ──────────────────────────────────────────
+
+def test_accept_requires_exact_operator_bond(module, c):
+    m = _retain(module, c, accept=False)
+    _as(module, OPERATOR, value=_op_bond(4 * GEN, 4) - 1)      # too little
+    with pytest.raises(module.gl.vm.UserError, match="operator bond exactly"):
+        c.accept_mandate(m["mandate_id"])
+    _as(module, OPERATOR, value=_op_bond(4 * GEN, 4) + 1)      # too much
+    with pytest.raises(module.gl.vm.UserError, match="operator bond exactly"):
+        c.accept_mandate(m["mandate_id"])
+
+
+def test_bonds_held_tracked_in_stats(module, c):
+    _retain(module, c)
+    assert json.loads(c.get_stats())["bonds_held_wei"] == str(_op_bond(4 * GEN, 4))
+
+
+def test_bond_returned_to_operator_on_client_cancel(module, c):
+    m = _retain(module, c)                       # accepted, bond posted
+    mid = m["mandate_id"]
+    _as(module, CLIENT); c.cancel_mandate(mid)   # ACTIVE cancel arms
+    # tick past the cancel window with unaccepted retains (they post no bond)
+    _retain(module, c, total=GEN, windows=2, accept=False)
+    _retain(module, c, total=GEN, windows=2, accept=False)
+    _as(module, CLIENT)
+    out = json.loads(c.finalize_cancel(mid))
+    assert out["status"] == "CANCELLED"
+    assert int(out["bond_returned_wei"]) == _op_bond(4 * GEN, 4)
+    assert _GL._emit.total_to(OPERATOR) == _op_bond(4 * GEN, 4)   # bond home, not slashed
+    assert json.loads(c.get_stats())["bonds_held_wei"] == "0"
+
+
+# ── v0.3 — timed review windows + permissionless forfeit ──────────────────────
+
+BASE = 1_790_000_000
+
+
+def test_timed_accept_arms_deadline(module, c):
+    _NOW[0] = BASE
+    m = _retain(module, c, interval=24)
+    assert int(m["window_interval_seconds"]) == 24 * 3600
+    assert int(m["window_deadline_epoch"]) == BASE + 24 * 3600
+
+
+def test_forfeit_rejected_on_manual_mandate(module, c):
+    m = _retain(module, c)                       # interval 0 = manual
+    with pytest.raises(module.gl.vm.UserError, match="not on a timed cadence"):
+        c.forfeit_window(m["mandate_id"])
+
+
+def test_forfeit_before_deadline_reverts(module, c):
+    _NOW[0] = BASE
+    m = _retain(module, c, interval=24)
+    _NOW[0] = BASE + 12 * 3600                    # only 12h in
+    with pytest.raises(module.gl.vm.UserError, match="not overdue"):
+        c.forfeit_window(m["mandate_id"])
+
+
+def test_forfeit_overdue_reclaims_window_for_client(module, c):
+    _NOW[0] = BASE
+    m = _retain(module, c, interval=24)          # rate 1 GEN/window
+    mid = m["mandate_id"]
+    _NOW[0] = BASE + 25 * 3600                    # overdue
+    _as(module, STRANGER)                         # permissionless
+    out = json.loads(c.forfeit_window(mid))
+    assert out["ruling"] == "FORFEIT" and out["paid_wei"] == "0"
+    assert _GL._emit.total_to(CLIENT) == GEN      # the window's tranche reclaimed
+    updated = json.loads(c.get_mandate(mid))
+    assert updated["windows_done"] == 1
+    assert updated["forfeits_count"] == 1
+    assert updated["strikes"] == 1
+    assert int(updated["window_deadline_epoch"]) == BASE + 25 * 3600 + 24 * 3600
+    assert json.loads(c.get_operator_record(OPERATOR))["forfeits"] == 1
+
+
+def test_forfeit_fails_closed_without_clock(module, c):
+    _NOW[0] = BASE
+    m = _retain(module, c, interval=24)
+    mid = m["mandate_id"]
+    _NOW[0] = 0                                    # clock goes down
+    with pytest.raises(module.gl.vm.UserError, match="clock is unavailable"):
+        c.forfeit_window(mid)
+
+
+def test_all_windows_forfeited_slashes_bond_to_client(module, c):
+    _NOW[0] = BASE
+    m = _retain(module, c, total=2 * GEN, windows=2, interval=24)   # bond 0.4 GEN
+    mid = m["mandate_id"]
+    _NOW[0] = BASE + 25 * 3600; _as(module, STRANGER); c.forfeit_window(mid)
+    _NOW[0] = BASE + 50 * 3600; _as(module, STRANGER)
+    out = json.loads(c.forfeit_window(mid))
+    updated = json.loads(c.get_mandate(mid))
+    assert updated["status"] == "COMPLETED" and updated["forfeits_count"] == 2
+    # both window tranches (2 GEN) + the slashed bond all went to the client
+    assert _GL._emit.total_to(CLIENT) == 2 * GEN + _op_bond(2 * GEN, 2)
+    assert _GL._emit.total_to(OPERATOR) == 0
+    assert updated["operator_bond_wei"] == "0"
+
+
+# ── v0.3 — on-chain evidence snapshot ─────────────────────────────────────────
+
+def test_review_records_evidence_digest_and_hash(module, c):
+    import hashlib as _h
+    m = _retain(module, c)
+    digest = "S1: 'Example Blog' — latest 'Shipping v2' dated 2026-07-20; two dev-tooling posts."
+    _EqPrinciple.canned = _verdict(ruling="RELEASE", evidence_digest=digest)
+    _as(module, OPERATOR)
+    rv = json.loads(c.review_window(m["mandate_id"]))
+    assert rv["evidence_digest"] == digest
+    assert rv["evidence_hash"] == _h.sha256(digest.encode("utf-8")).hexdigest()
+    # the stored review carries the same immutable fingerprint
+    stored = json.loads(c.get_review(rv["review_id"]))
+    assert stored["evidence_hash"] == rv["evidence_hash"]

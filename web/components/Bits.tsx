@@ -78,6 +78,15 @@ export function ReviewEntry({ rv }: { rv: Review }) {
         {BigInt(rv.paid_wei || "0") > BigInt(0) && <span className="chip" style={{ color: "var(--release)" }}>paid {genFromWei(rv.paid_wei)} GEN</span>}
       </div>
       <p className="text-sm leading-relaxed">{rv.summary}</p>
+      {rv.evidence_digest && (
+        <div className="inset p-3 mt-3">
+          <div className="eyebrow mb-1">Evidence snapshot · what the panel read this window</div>
+          <p className="text-[0.8rem] leading-relaxed">{rv.evidence_digest}</p>
+          {rv.evidence_hash && (
+            <p className="mono text-[0.56rem] muted mt-1 break-all">sha256 · {rv.evidence_hash}</p>
+          )}
+        </div>
+      )}
       {rv.violations.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1">
           {rv.violations.map((v, i) => (
