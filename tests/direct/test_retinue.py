@@ -194,7 +194,7 @@ def c(module):
     r = module.Retinue()
     for name in ("mandates", "reviews", "client_mandates", "operator_mandates",
                  "seq_counts", "records", "operators", "handles", "operator_index",
-                 "offers", "offers_by_client", "offers_by_operator"):
+                 "bench_board", "offers", "offers_by_client", "offers_by_operator"):
         setattr(r, name, module.TreeMap())
     return r
 
@@ -216,7 +216,9 @@ def _retain(module, c, total=4 * GEN, windows=4, template="retainer", accept=Tru
     m = json.loads(c.retain(OPERATOR, "Example brand blog", template, BRIEF,
                              json.dumps([SURFACE]), windows, interval))
     if accept:
-        _as(module, OPERATOR, value=_op_bond(total, windows))
+        # post exactly what the contract quotes (base bond less any reputation discount)
+        q = json.loads(c.quote_accept(m["mandate_id"]))
+        _as(module, OPERATOR, value=int(q["required_bond_wei"]))
         m = json.loads(c.accept_mandate(m["mandate_id"]))
     return m
 
@@ -917,3 +919,53 @@ def test_review_records_evidence_digest_and_hash(module, c):
     # the stored review carries the same immutable fingerprint
     stored = json.loads(c.get_review(rv["review_id"]))
     assert stored["evidence_hash"] == rv["evidence_hash"]
+
+
+# ── v0.4 — reputation made load-bearing ───────────────────────────────────────
+
+def test_new_operator_pays_full_bond(module, c):
+    m = _retain(module, c, accept=False)
+    q = json.loads(c.quote_accept(m["mandate_id"]))
+    assert q["operator_reputation"] == 0
+    assert q["discount_bps"] == 0
+    assert q["required_bond_wei"] == q["base_bond_wei"]
+
+
+def test_reputation_builds_and_discounts_the_bond(module, c):
+    m1 = _retain(module, c, total=4 * GEN, windows=4)
+    for _ in range(4):
+        _review(module, c, m1["mandate_id"], "RELEASE")
+    rec = json.loads(c.get_operator_record(OPERATOR))
+    assert rec["completed"] == 1 and rec["released"] == 4
+    assert rec["reputation"] == 4 * 3 + 12               # released*3 + completed*12 = 24
+    m2 = _retain(module, c, total=4 * GEN, windows=4, accept=False)
+    q = json.loads(c.quote_accept(m2["mandate_id"]))
+    assert q["operator_reputation"] == rec["reputation"]
+    assert q["discount_bps"] == min(5000, rec["reputation"] * 50)
+    assert int(q["required_bond_wei"]) < int(q["base_bond_wei"])   # proven → cheaper bond
+
+
+def test_revoke_cuts_reputation_to_zero(module, c):
+    m = _retain(module, c)
+    _review(module, c, m["mandate_id"], "RELEASE")       # +3
+    _review(module, c, m["mandate_id"], "REVOKE")        # arms
+    _retain(module, c, accept=False)                     # tick
+    _retain(module, c, accept=False)                     # tick
+    _as(module, CLIENT); c.finalize_revoke(m["mandate_id"])
+    rec = json.loads(c.get_operator_record(OPERATOR))
+    assert rec["revokes"] == 1
+    assert rec["reputation"] == 0                         # 3 − 20, clamped
+
+
+def test_ranked_bench_orders_by_reputation(module, c):
+    OP2 = "0xbbb4444444444444444444444444444444444444"
+    _as(module, OPERATOR); c.register_operator("alpha", "A bio long enough to matter.", ["x"], str(GEN), [SURFACE])
+    _as(module, OP2);      c.register_operator("beta", "A bio long enough to matter.", ["y"], str(GEN), [SURFACE])
+    m = _retain(module, c, windows=2)                    # OPERATOR earns a completion
+    _review(module, c, m["mandate_id"], "RELEASE")
+    _review(module, c, m["mandate_id"], "RELEASE")
+    ranked = json.loads(c.get_bench_ranked("10"))
+    assert len(ranked) == 2
+    assert ranked[0]["operator"].lower() == OPERATOR.lower()   # higher reputation first
+    assert ranked[0]["reputation"] > ranked[1]["reputation"]
+    assert ranked[1]["operator"].lower() == OP2.lower()

@@ -116,8 +116,8 @@ never be coerced into an adverse `REVOKE`.
 | Chain ID | `61999` |
 | RPC | `https://studio.genlayer.com/api` |
 | Explorer | `https://explorer-studio.genlayer.com` |
-| Version | `v0.3.0` |
-| Contract address | [`0xe5BaeEf5acb2260A6E377492c9f3Dc7403Bf5AFE`](https://studio.genlayer.com/?import-contract=0xe5BaeEf5acb2260A6E377492c9f3Dc7403Bf5AFE) |
+| Version | `v0.4.0` |
+| Contract address | [`0x5520a08eF6852C512f3E84c9674A74524262a929`](https://studio.genlayer.com/?import-contract=0x5520a08eF6852C512f3E84c9674A74524262a929) |
 | Source | `contracts/retinue.py` |
 | Owner | None - no admin keys, no constructor arguments, no pooled funds |
 
@@ -171,6 +171,18 @@ never be coerced into an adverse `REVOKE`.
   a factual fingerprint of exactly what it read that window - and a `sha256` of it, so the evidence
   behind each ruling is on the record and tamper-evident.
 
+### New in v0.4 - reputation made load-bearing
+
+The portable operator record was already written by every ruling; v0.4 makes it *do* something.
+
+- **Reputation discounts the bond** - a deterministic 0-100 standing is derived in code from the
+  record (completions and clean windows build it; strikes, missed cadence, and revokes cut it -
+  never self-reported, never LLM). A proven operator's performance bond is discounted by it, down to
+  half. `quote_accept(mandate_id)` returns the exact bond to post. The record earns cheaper capital -
+  the ERC-8004 "reputation clients hire on", made economic.
+- **Ranked hiring directory** - the Bench is ranked by that on-chain reputation, read from a
+  maintained top-K (`get_bench_ranked`) - no scan. Clients hire from the top.
+
 ## Verified end-to-end
 
 Full MetaMask + CLI stress test across three mandates and all six layers (2026-07-14):
@@ -202,7 +214,7 @@ solvency  -> the book squared exactly at every step
 ## Repository
 
 ```text
-contracts/retinue.py        The Intelligent Contract (v0.3.0, deployed)
+contracts/retinue.py        The Intelligent Contract (v0.4.0, deployed)
 tests/direct/               44 direct-mode tests, pytest
 web/                        Next.js frontend (bench, offers, mandates, mandate room, registry)
 ```

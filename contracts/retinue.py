@@ -1,4 +1,4 @@
-# v0.3.0
+# v0.4.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 from genlayer import *
@@ -79,6 +79,13 @@ CANCEL_WINDOW_ACTIONS = 2
 # REVOKE or if any window was forfeited; returned on a client-initiated cancel.
 OPERATOR_BOND_BPS    = 2000              # 20% of the retainer
 MIN_OPERATOR_BOND_WEI = 2 * (10 ** 16)   # floor: 0.02 GEN
+
+# v0.4 — reputation is load-bearing: a proven operator's on-chain record
+# discounts the performance bond (down to half), and the Bench ranks by it.
+# The score is derived deterministically from the record in code — never
+# self-reported, never LLM — so it cannot be gamed.
+MAX_BOND_DISCOUNT_BPS = 5000             # a top-reputation operator posts half the bond
+BENCH_BOARD_CAP       = 200              # maintained top-K ranked directory (no scan)
 
 # Optional timed cadence (v0.3): a mandate may pin a real wall-clock interval so
 # a stale operator's window can be permissionlessly forfeited back to the client.
@@ -215,6 +222,7 @@ class Retinue(gl.Contract):
     operators:      TreeMap[str, str]   # address(lower) -> profile JSON
     handles:        TreeMap[str, str]   # handle(lower)  -> address(lower)
     operator_index: TreeMap[str, str]   # flat "bench:<i>" -> address(lower)
+    bench_board:    TreeMap[str, str]   # "list" -> JSON top-K operators ranked by reputation
 
     # ── layer 2: offers (unfunded term sheets) ───────────────────────────────
     total_offers:    u256
@@ -318,10 +326,51 @@ class Retinue(gl.Contract):
                 "warns": 0, "constrains": 0, "revokes": 0, "completed": 0,
                 "appeals_won": 0, "appeals_lost": 0, "forfeits": 0}
 
+    def _reputation_score(self, rec) -> int:
+        """A deterministic 0-100 standing derived purely from the panel-written
+        record — never self-reported. Delivering (completions, clean windows,
+        vindicated appeals) builds it; strikes, missed cadence, and revokes cut
+        it. A brand-new operator scores 0 (unproven → full bond)."""
+        s = (int(rec.get("completed", 0)) * 12
+             + int(rec.get("released", 0)) * 3
+             + int(rec.get("appeals_won", 0)) * 4
+             - int(rec.get("warns", 0)) * 3
+             - int(rec.get("constrains", 0)) * 8
+             - int(rec.get("forfeits", 0)) * 10
+             - int(rec.get("revokes", 0)) * 20
+             - int(rec.get("appeals_lost", 0)) * 3)
+        return max(0, min(100, s))
+
+    def _bond_discount_bps(self, address) -> int:
+        score = self._reputation_score(self._record(address))
+        return min(MAX_BOND_DISCOUNT_BPS, score * (MAX_BOND_DISCOUNT_BPS // 100))
+
+    def _bump_bench(self, address):
+        """Maintain the top-K ranked directory in storage — no scan at read time.
+        Only registered operators appear; ranked by the derived reputation score."""
+        key = address.lower()
+        prof = self.operators.get(key, "")
+        if not prof:
+            return
+        p = json.loads(prof)
+        score = self._reputation_score(self._record(key))
+        board = json.loads(self.bench_board.get("list", "[]"))
+        board = [e for e in board if str(e.get("operator", "")).lower() != key]
+        board.append({
+            "operator":      p.get("operator", address),
+            "handle":        p.get("handle", ""),
+            "reputation":    score,
+            "specialties":   p.get("specialties", []),
+            "rate_hint_wei": p.get("rate_hint_wei", "0"),
+        })
+        board.sort(key=lambda x: x["reputation"], reverse=True)
+        self.bench_board["list"] = json.dumps(board[:BENCH_BOARD_CAP])
+
     def _bump(self, address, field, n=1):
         r = self._record(address)
         r[field] = int(r.get(field, 0)) + n
         self.records[address.lower()] = json.dumps(r)
+        self._bump_bench(address)
 
     def _pay(self, address, amount):
         if amount > 0:
@@ -621,6 +670,7 @@ Respond ONLY with JSON:
         }
         self.operators[key] = json.dumps(profile)
         self.handles[h] = key
+        self._bump_bench(key)     # enter/refresh the ranked directory
         return json.dumps(profile)
 
     # ── layer 2: offers — negotiate before a wei moves ───────────────────────
@@ -894,10 +944,18 @@ Respond ONLY with JSON:
         )
         return json.dumps(m)
 
-    def _operator_bond_required(self, m) -> int:
+    def _operator_bond_base(self, m) -> int:
         # 20% of the retainer (escrow is still whole at PROPOSED), min 0.02 GEN.
         total = int(m["rate_wei"]) * int(m["windows_total"])
         return max(total * OPERATOR_BOND_BPS // 10000, MIN_OPERATOR_BOND_WEI)
+
+    def _operator_bond_required(self, m) -> int:
+        # Reputation is load-bearing: a proven operator's record discounts the
+        # bond (down to half at max standing). Never below the floor.
+        base = self._operator_bond_base(m)
+        discount = self._bond_discount_bps(m["operator"])
+        required = base * (10000 - discount) // 10000
+        return max(required, MIN_OPERATOR_BOND_WEI)
 
     @gl.public.write.payable
     def accept_mandate(self, mandate_id: str) -> str:
@@ -1358,7 +1416,9 @@ Respond ONLY with JSON:
 
     @gl.public.view
     def get_operator_record(self, address: str) -> str:
-        return json.dumps(self._record(address))
+        rec = self._record(address)
+        rec["reputation"] = self._reputation_score(rec)
+        return json.dumps(rec)
 
     @gl.public.view
     def get_operator_profile(self, address: str) -> str:
@@ -1366,7 +1426,10 @@ Respond ONLY with JSON:
         key = address.lower()
         raw = self.operators.get(key, "")
         profile = json.loads(raw) if raw else {}
-        profile["record"] = self._record(address)
+        rec = self._record(address)
+        rec["reputation"] = self._reputation_score(rec)
+        profile["record"] = rec
+        profile["bond_discount_bps"] = self._bond_discount_bps(address)
         return json.dumps(profile)
 
     @gl.public.view
@@ -1383,9 +1446,33 @@ Respond ONLY with JSON:
             raw = self.operators.get(addr, "")
             if raw:
                 p = json.loads(raw)
-                p["record"] = self._record(addr)
+                rec = self._record(addr)
+                rec["reputation"] = self._reputation_score(rec)
+                p["record"] = rec
                 out.append(p)
         return json.dumps(out)
+
+    @gl.public.view
+    def get_bench_ranked(self, n: str) -> str:
+        """The hiring directory ranked by on-chain reputation — read straight
+        from the maintained top-K, no scan. This is the record made load-bearing:
+        clients hire from the top."""
+        board = json.loads(self.bench_board.get("list", "[]"))
+        return json.dumps(board[:max(1, int(n or "50"))])
+
+    @gl.public.view
+    def quote_accept(self, mandate_id: str) -> str:
+        """The exact performance bond the operator must post to accept — the base
+        20% less their reputation discount. The frontend sends this value."""
+        m = self._mandate(mandate_id)
+        base = self._operator_bond_base(m)
+        required = self._operator_bond_required(m)
+        return json.dumps({
+            "base_bond_wei":      str(base),
+            "discount_bps":       self._bond_discount_bps(m["operator"]),
+            "required_bond_wei":  str(required),
+            "operator_reputation": self._reputation_score(self._record(m["operator"])),
+        })
 
     @gl.public.view
     def get_offer(self, offer_id: str) -> str:
@@ -1434,4 +1521,5 @@ Respond ONLY with JSON:
             "min_operator_bond_wei": str(MIN_OPERATOR_BOND_WEI),
             "window_interval_hours_range": [MIN_WINDOW_INTERVAL_SECONDS // 3600,
                                             MAX_WINDOW_INTERVAL_SECONDS // 3600],
+            "max_bond_discount_bps": MAX_BOND_DISCOUNT_BPS,
         })

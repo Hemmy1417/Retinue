@@ -5,9 +5,9 @@ import Link from "next/link";
 import { useWallet } from "@/lib/wallet";
 import {
   getMandate, getReviewsFor, acceptMandate, reviewWindow, appealRuling, postWindowNote,
-  finalizeRevoke, cancelMandate, finalizeCancel, forfeitWindow, operatorBondRequired,
+  finalizeRevoke, cancelMandate, finalizeCancel, forfeitWindow, getAcceptQuote,
   genFromWei, shortAddr, appealBondWei,
-  type Mandate, type Review,
+  type Mandate, type Review, type AcceptQuote,
 } from "@/lib/retinue";
 import { TEMPLATE_META } from "@/lib/config";
 import { StatusChip, WindowMeter, ReviewEntry } from "@/components/Bits";
@@ -23,12 +23,14 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
   const [appealText, setAppealText] = useState("");
+  const [quote, setQuote] = useState<AcceptQuote | null>(null);
 
   const load = useCallback(async () => {
     try {
       const mk = await getMandate(id);
       setM(mk);
       if (mk) getReviewsFor(id).then(setReviews).catch(() => {});
+      if (mk?.status === "PROPOSED") getAcceptQuote(id).then(setQuote).catch(() => {});
     } catch { setM(null); } finally { setLoading(false); }
   }, [id]);
   useEffect(() => { load(); }, [load]);
@@ -115,13 +117,19 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
           <div className="eyebrow mb-1" style={{ color: "var(--signal)" }}>Awaiting operator acceptance</div>
           <p className="text-sm">
             Nothing can be judged and nothing touches the operator&apos;s record until they accept.
-            Accepting posts a <strong>performance bond of {genFromWei(operatorBondRequired(m).toString())} GEN</strong> (20%
-            of the retainer): it comes home in full on a clean completion, and is slashed to the client on a
-            final revoke or any window let go stale. <em>The surfaces are mine — judge the work from here on.</em>
+            Accepting posts a <strong>performance bond of {quote ? genFromWei(quote.required_bond_wei) : "…"} GEN</strong>:
+            it comes home in full on a clean completion, and is slashed to the client on a final revoke or any
+            window let go stale. <em>The surfaces are mine — judge the work from here on.</em>
           </p>
-          {isOperator && (
-            <button onClick={() => run("accept", () => acceptMandate(client, m.mandate_id, operatorBondRequired(m)))} disabled={!!busy} className="btn btn-signal mt-3">
-              {busy === "accept" ? "Accepting…" : `Accept & post ${genFromWei(operatorBondRequired(m).toString())} GEN bond`}
+          {quote && quote.discount_bps > 0 && (
+            <p className="mono text-[0.66rem] mt-1" style={{ color: "var(--release)" }}>
+              Reputation {quote.operator_reputation}/100 → {(quote.discount_bps / 100).toFixed(0)}% bond discount
+              (base {genFromWei(quote.base_bond_wei)} GEN). Your on-chain record earns cheaper capital.
+            </p>
+          )}
+          {isOperator && quote && (
+            <button onClick={() => run("accept", () => acceptMandate(client, m.mandate_id, BigInt(quote.required_bond_wei)))} disabled={!!busy} className="btn btn-signal mt-3">
+              {busy === "accept" ? "Accepting…" : `Accept & post ${genFromWei(quote.required_bond_wei)} GEN bond`}
             </button>
           )}
         </div>

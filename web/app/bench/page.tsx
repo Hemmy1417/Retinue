@@ -27,7 +27,12 @@ export default function BenchPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  const load = useCallback(() => { getBench(50).then(setBench).catch(() => {}); }, []);
+  const load = useCallback(() => {
+    // ranked by on-chain reputation — the record made load-bearing for hiring
+    getBench(50)
+      .then((b) => setBench([...b].sort((a, c) => (c.record?.reputation ?? 0) - (a.record?.reputation ?? 0))))
+      .catch(() => {});
+  }, []);
   useEffect(() => { load(); }, [load]);
 
   const mine = address ? bench.find((p) => p.operator.toLowerCase() === address.toLowerCase()) : undefined;
@@ -129,7 +134,10 @@ export default function BenchPage() {
                   </div>
                 )}
                 <div className="flex items-center justify-between mono text-[0.62rem] muted mt-auto pt-2" style={{ borderTop: "1px dashed var(--line)" }}>
-                  <span>{r ? `${r.windows_served} windows · ${r.completed} completed` : "no record yet"}</span>
+                  <span>
+                    <span style={{ color: "var(--ink)" }}>rep {r?.reputation ?? 0}/100</span>
+                    {r ? ` · ${r.windows_served}w · ${r.completed} done` : ""}
+                  </span>
                   <span>{genFromWei(p.rate_hint_wei)} GEN/wk</span>
                 </div>
                 <div className="flex gap-2">

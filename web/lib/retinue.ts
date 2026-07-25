@@ -117,6 +117,7 @@ export type OperatorRecord = {
   appeals_won: number;
   appeals_lost: number;
   forfeits?: number;
+  reputation?: number;   // v0.4 — derived 0-100 standing
 };
 
 export type Stats = {
@@ -239,6 +240,34 @@ export async function getStats(): Promise<Stats | null> {
 export async function getBench(n = 50): Promise<OperatorProfile[]> {
   const raw = await read("get_bench", [String(n)]);
   return raw ? JSON.parse(raw) : [];
+}
+
+export type BenchRank = {
+  operator: string;
+  handle: string;
+  reputation: number;
+  specialties: string[];
+  rate_hint_wei: string;
+};
+
+// The hiring directory ranked by on-chain reputation (maintained top-K, no scan).
+export async function getBenchRanked(n = 50): Promise<BenchRank[]> {
+  const raw = await read("get_bench_ranked", [String(n)]);
+  return raw ? JSON.parse(raw) : [];
+}
+
+export type AcceptQuote = {
+  base_bond_wei: string;
+  discount_bps: number;
+  required_bond_wei: string;
+  operator_reputation: number;
+};
+
+// The exact performance bond the operator must post to accept — the base 20%
+// less their reputation discount. Read this before accept, send required_bond_wei.
+export async function getAcceptQuote(mandateId: string): Promise<AcceptQuote | null> {
+  const raw = await read("quote_accept", [mandateId]);
+  return raw ? JSON.parse(raw) : null;
 }
 
 export async function getOperatorProfile(address: string): Promise<OperatorProfile | null> {
