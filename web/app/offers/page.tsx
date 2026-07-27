@@ -6,8 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useWallet } from "@/lib/wallet";
 import {
   getOffersFor, proposeOffer, counterOffer, acceptOffer, withdrawOffer, retainFromOffer,
-  genFromWei, genToWei, shortAddr, type Offer,
-} from "@/lib/retinue";
+  genFromWei, genToWei, shortAddr, type Offer, docketNo} from "@/lib/retinue";
 
 const STATUS_COLOR: Record<string, string> = {
   OPEN: "var(--warn)", AGREED: "var(--release)", FUNDED: "var(--signal)", WITHDRAWN: "var(--muted)",
@@ -143,7 +142,7 @@ function OffersInner() {
               <div key={o.offer_id} className="panel p-4">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div style={{ minWidth: 0 }}>
-                    <p className="body-strong text-sm">{o.title} <span className="mono text-[0.62rem] muted">· {o.offer_id} · {o.template}</span></p>
+                    <p className="body-strong text-sm">{o.title} <span className="mono text-[0.62rem] muted">· Offer {docketNo(o.offer_id)} · {o.template}</span></p>
                     <p className="mono text-[0.64rem] muted mt-0.5">
                       {meClient ? <>you → <Link href={`/u/${o.operator}`} className="link">{shortAddr(o.operator)}</Link></> : <>{shortAddr(o.client)} → you</>}
                       {" · "}{o.windows} windows × {genFromWei(o.rate_wei)} GEN = {genFromWei(total.toString())} GEN
@@ -190,7 +189,7 @@ function OffersInner() {
                   )}
                   {o.status === "FUNDED" && o.mandate_id && (
                     <Link href={`/m/${o.mandate_id}`} className="btn btn-signal" style={{ fontSize: "0.76rem", padding: "0.4rem 0.8rem" }}>
-                      Open mandate {o.mandate_id} →
+                      Open the mandate →
                     </Link>
                   )}
                 </div>

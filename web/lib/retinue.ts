@@ -427,3 +427,21 @@ export async function postWindowNote(client: Client, mandateId: string, note: st
   return writeAndWait<{ mandate_id: string; window_note: string }>(
     client, "post_window_note", [mandateId, note]);
 }
+
+
+/**
+ * Contract ids are sequential and zero-based (`m_0`, `rv_3`, `b-2`). Exact, and they
+ * must stay quotable against the chain — but as a page title they read like debug
+ * output. Headings get a 1-based, zero-padded docket number; the raw id survives as a
+ * small muted reference. Headline for humans, reference for auditors.
+ */
+export function docketNo(id: string): string {
+  const n = Number(String(id).split(/[-_]/).pop());
+  return Number.isFinite(n) ? String(n + 1).padStart(4, "0") : String(id);
+}
+
+/** "lead_submitted" -> "Lead submitted" — stored slugs are not display strings. */
+export function humanize(s: string): string {
+  const t = String(s || "").replace(/[_-]+/g, " ").trim();
+  return t ? t[0].toUpperCase() + t.slice(1) : "";
+}

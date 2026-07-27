@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { RULING_META, STATUS_META, TEMPLATE_META } from "@/lib/config";
-import { genFromWei, shortAddr, type Mandate, type Review } from "@/lib/retinue";
+import { genFromWei, shortAddr, type Mandate, type Review, docketNo} from "@/lib/retinue";
 
 export function RulingStamp({ ruling }: { ruling: string }) {
   const m = RULING_META[ruling] ?? { label: ruling, tone: "muted" };
@@ -60,7 +60,7 @@ export function ReviewEntry({ rv }: { rv: Review }) {
   return (
     <div className="panel p-4 fade-in">
       <div className="flex items-center gap-2 flex-wrap mb-2">
-        <span className="mono text-[0.62rem] muted">Window {rv.window_index + 1} · {rv.review_id}</span>
+        <span className="mono text-[0.62rem] muted">Window {rv.window_index + 1} · Review {docketNo(rv.review_id)}</span>
         <RulingStamp ruling={rv.ruling} />
         {rv.appealed && (
           <span className={`stamp ${rv.appeal_outcome === "FLIPPED" ? "stamp-release" : "stamp-muted"}`}>

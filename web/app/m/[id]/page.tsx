@@ -7,8 +7,7 @@ import {
   getMandate, getReviewsFor, acceptMandate, reviewWindow, appealRuling, postWindowNote,
   finalizeRevoke, cancelMandate, finalizeCancel, forfeitWindow, getAcceptQuote,
   genFromWei, shortAddr, appealBondWei,
-  type Mandate, type Review, type AcceptQuote,
-} from "@/lib/retinue";
+  type Mandate, type Review, type AcceptQuote, docketNo} from "@/lib/retinue";
 import { TEMPLATE_META } from "@/lib/config";
 import { StatusChip, WindowMeter, ReviewEntry } from "@/components/Bits";
 
@@ -78,7 +77,7 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
         <span className="chip">{tmpl.label}</span>
         <StatusChip status={m.status} />
         {m.strikes > 0 && <span className="stamp stamp-warn">{m.strikes} strike{m.strikes > 1 ? "s" : ""}</span>}
-        <span className="mono text-xs muted ml-auto">{m.mandate_id}</span>
+        <span className="eyebrow ml-auto" style={{ color: "var(--signal)" }}>Mandate No. {docketNo(m.mandate_id)}</span>
       </div>
       <h1 className="display" style={{ fontSize: "clamp(22px, 3.2vw, 34px)" }}>{m.title}</h1>
       <p className="mono text-xs muted mt-2">
@@ -217,7 +216,7 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
       {/* appeal */}
       {appealable && (
         <div className="panel p-4 mt-4" style={{ borderColor: "var(--signal)" }}>
-          <div className="eyebrow mb-1" style={{ color: "var(--signal)" }}>Appeal the last ruling · {last.review_id}</div>
+          <div className="eyebrow mb-1" style={{ color: "var(--signal)" }}>Appeal the last ruling · Review {docketNo(last.review_id)}</div>
           <p className="text-sm mb-2">
             Post a <span className="mono ink">{genFromWei(bond)} GEN</span> bond for a second panel
             round over the same surfaces, with your instructions in front of the panel. Flipped →
