@@ -3,9 +3,10 @@
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@/lib/wallet";
+import { useTx } from "@/lib/tx";
 import {
   getMandate, getReviewsFor, acceptMandate, reviewWindow, appealRuling, postWindowNote,
-  finalizeRevoke, cancelMandate, finalizeCancel, forfeitWindow, getAcceptQuote,
+  finalizeRevoke, cancelMandate, finalizeCancel, forfeitWindow, getAcceptQuote, awaitReceipt,
   genFromWei, shortAddr, appealBondWei,
   type Mandate, type Review, type AcceptQuote, docketNo} from "@/lib/retinue";
 import { TEMPLATE_META } from "@/lib/config";
@@ -14,6 +15,7 @@ import { StatusChip, WindowMeter, ReviewEntry } from "@/components/Bits";
 export default function MandateFile({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { address, client, connect } = useWallet();
+  const tx = useTx();
   const [m, setM] = useState<Mandate | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,19 +36,57 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
-  async function run(label: string, fn: () => Promise<unknown>) {
+  /**
+   * Every write goes through the transaction lifecycle.
+   *
+   * `settled` is the part that matters: it polls a contract view until the change is
+   * actually readable, because a GenLayer receipt says ACCEPTED, not "views updated".
+   * Refreshing the instant the receipt lands re-renders the same pre-transaction state
+   * and the page looks like nothing happened.
+   */
+  async function run(
+    tag: string,
+    opts: {
+      label: string; detail?: string; effect?: string;
+      send: () => Promise<string>;
+      settled?: () => Promise<boolean>;
+    },
+  ) {
     if (!client) return connect().catch(() => {});
-    setErr(""); setNote(""); setBusy(label);
+    setErr(""); setNote(""); setBusy(tag);
     try {
-      const out = await fn();
-      // the LLM-outage fail-safe returns an INCONCLUSIVE no-op — surface it
-      const o = out as { ruling?: string; note?: string } | null;
-      if (o && o.ruling === "INCONCLUSIVE") setNote(o.note || "Review inconclusive — nothing changed, run it again.");
-      await load();
-      setAppealText("");
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-    finally { setBusy(""); }
+      await tx.run({
+        label: opts.label,
+        detail: opts.detail,
+        effect: opts.effect,
+        send: opts.send,
+        confirm: async (h) => {
+          const out = await awaitReceipt<{ ruling?: string; note?: string }>(client, h);
+          // The LLM-outage fail-safe returns an INCONCLUSIVE no-op — surface it rather
+          // than letting a "confirmed" toast imply the mandate actually moved.
+          if (out?.ruling === "INCONCLUSIVE") {
+            setNote(out.note || "Review inconclusive — nothing changed, run it again.");
+          }
+          return out;
+        },
+        settled: opts.settled,
+        onSettled: async () => { await load(); setAppealText(""); },
+      });
+    } catch {
+      /* the toast owns the error */
+    } finally {
+      setBusy("");
+    }
   }
+
+  /** Poll until the mandate leaves the state it was in when we started. */
+  const mandateLeft = (from: string) => async () => {
+    const mk = await getMandate(id);
+    return !!mk && mk.status !== from;
+  };
+  /** Poll until a new review has been written to the record. */
+  const reviewAdded = (before: number) => async () =>
+    (await getReviewsFor(id).catch(() => [])).length > before;
 
   if (loading) return <p className="max-w-3xl mx-auto px-5 py-24 text-sm muted">Reading the file…</p>;
   if (!m) {
@@ -127,7 +167,13 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
             </p>
           )}
           {isOperator && quote && (
-            <button onClick={() => run("accept", () => acceptMandate(client, m.mandate_id, BigInt(quote.required_bond_wei)))} disabled={!!busy} className="btn btn-signal mt-3">
+            <button onClick={() => run("accept", {
+              label: "Accept the mandate",
+              detail: `${m.title} · bond ${genFromWei(quote.required_bond_wei)} GEN`,
+              effect: "Accepted — the mandate is live and the bond is posted.",
+              send: () => acceptMandate(client, m.mandate_id, BigInt(quote.required_bond_wei)),
+              settled: mandateLeft("PROPOSED"),
+            })} disabled={!!busy} className="btn btn-signal mt-3">
               {busy === "accept" ? "Accepting…" : `Accept & post ${genFromWei(quote.required_bond_wei)} GEN bond`}
             </button>
           )}
@@ -154,7 +200,16 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
               {m.forfeits_count > 0 && <span className="mono muted"> · {m.forfeits_count} forfeited</span>}
             </p>
             {overdue && (
-              <button onClick={() => run("forfeit", () => forfeitWindow(client, m.mandate_id))} disabled={!!busy} className="btn btn-danger mt-3">
+              <button onClick={() => { const done = m.windows_done; return run("forfeit", {
+                label: "Forfeit the window",
+                detail: `${m.title} · window ${done + 1}`,
+                effect: `${genFromWei(m.rate_wei)} GEN returned to the client; a miss lands on the record.`,
+                send: () => forfeitWindow(client, m.mandate_id),
+                settled: async () => {
+                  const mk = await getMandate(id);
+                  return !!mk && Number(mk.forfeits_count) > Number(m.forfeits_count);
+                },
+              }); }} disabled={!!busy} className="btn btn-danger mt-3">
                 {busy === "forfeit" ? "Forfeiting…" : `Forfeit window · reclaim ${genFromWei(m.rate_wei)} GEN for client`}
               </button>
             )}
@@ -170,7 +225,13 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
             The escrow does not move yet. The operator can post a bonded appeal below; anyone can
             execute the revoke once the window elapses (or the appeal is upheld).
           </p>
-          <button onClick={() => run("finalize", () => finalizeRevoke(client, m.mandate_id))} disabled={!!busy} className="btn btn-danger mt-3">
+          <button onClick={() => run("finalize", {
+            label: "Finalize the revoke",
+            detail: m.title,
+            effect: `${genFromWei(m.escrow_remaining_wei)} GEN returned to the client.`,
+            send: () => finalizeRevoke(client, m.mandate_id),
+            settled: mandateLeft("REVOKE_PENDING"),
+          })} disabled={!!busy} className="btn btn-danger mt-3">
             {busy === "finalize" ? "Executing…" : `Finalize revoke · return ${genFromWei(m.escrow_remaining_wei)} GEN to client`}
           </button>
         </div>
@@ -199,7 +260,13 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
                     placeholder="This window's posts are the two dated July 14, below the pinned header." />
                   <button className="btn-ghost" style={{ fontSize: "0.76rem", whiteSpace: "nowrap" }}
                     disabled={!!busy || noteDraft.trim().length < 10}
-                    onClick={() => run("note", async () => { await postWindowNote(client, m.mandate_id, noteDraft.trim()); setNoteDraft(""); })}>
+                    onClick={() => run("note", {
+                      label: "File the window note",
+                      detail: m.title,
+                      effect: "Filed — the panel will see it as advocacy, not evidence.",
+                      send: () => postWindowNote(client, m.mandate_id, noteDraft.trim()),
+                      settled: async () => !!(await getMandate(id))?.window_note,
+                    }).then(() => setNoteDraft(""))}>
                     {busy === "note" ? "Filing…" : "File note"}
                   </button>
                 </div>
@@ -207,7 +274,13 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
             </div>
           )}
 
-          <button onClick={() => run("review", () => reviewWindow(client, m.mandate_id))} disabled={!!busy} className="btn">
+          <button onClick={() => { const n = reviews.length; return run("review", {
+            label: "Run the review",
+            detail: `${m.title} · window ${m.windows_done + 1} of ${m.windows_total}`,
+            effect: "The panel has ruled — the record is written.",
+            send: () => reviewWindow(client, m.mandate_id),
+            settled: reviewAdded(n),
+          }); }} disabled={!!busy} className="btn">
             {busy === "review" ? "The panel is reading…" : "Run the review"}
           </button>
         </div>
@@ -225,7 +298,16 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
           <textarea value={appealText} onChange={(e) => setAppealText(e.target.value)} rows={3} maxLength={1500}
             placeholder="Tell the panel what the first round misread — point it at the exact post or section…" className="field text-sm" />
           <button
-            onClick={() => run("appeal", () => appealRuling(client, last.review_id, appealText.trim(), bond))}
+            onClick={() => run("appeal", {
+              label: "Appeal the ruling",
+              detail: `Review ${docketNo(last.review_id)} · bond ${genFromWei(bond)} GEN`,
+              effect: "The second panel has ruled — see the appeal outcome on the record.",
+              send: () => appealRuling(client, last.review_id, appealText.trim(), bond),
+              settled: async () => {
+                const rs = await getReviewsFor(id).catch(() => []);
+                return rs.some((r) => r.review_id === last.review_id && !!r.appeal_outcome);
+              },
+            })}
             disabled={!!busy || appealText.trim().length < 20}
             className="btn btn-signal mt-2"
           >
@@ -242,7 +324,13 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
             The escrow does not move yet. The operator can still run the due review and be paid
             for delivered work; once the window elapses, anyone can execute the cancel.
           </p>
-          <button onClick={() => run("finalize-cancel", () => finalizeCancel(client, m.mandate_id))} disabled={!!busy} className="btn-danger mt-3 btn">
+          <button onClick={() => run("finalize-cancel", {
+            label: "Finalize the cancel",
+            detail: m.title,
+            effect: `${genFromWei(m.escrow_remaining_wei)} GEN returned to the client.`,
+            send: () => finalizeCancel(client, m.mandate_id),
+            settled: mandateLeft("CANCEL_PENDING"),
+          })} disabled={!!busy} className="btn-danger mt-3 btn">
             {busy === "finalize-cancel" ? "Executing…" : `Finalize cancel · return ${genFromWei(m.escrow_remaining_wei)} GEN to client`}
           </button>
         </div>
@@ -251,7 +339,15 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
       {/* client cancel */}
       {isClient && (m.status === "PROPOSED" || m.status === "ACTIVE" || m.status === "CONSTRAINED") && (
         <div className="flex items-center gap-3 mt-4">
-          <button onClick={() => run("cancel", () => cancelMandate(client, m.mandate_id))} disabled={!!busy} className="btn-link" style={{ color: "var(--revoke)" }}>
+          <button onClick={() => run("cancel", {
+            label: "Cancel the mandate",
+            detail: m.title,
+            effect: m.status === "PROPOSED"
+              ? `${genFromWei(m.escrow_remaining_wei)} GEN reclaimed — nothing was at stake.`
+              : "A cancel window is now armed; the operator can still claim earned work.",
+            send: () => cancelMandate(client, m.mandate_id),
+            settled: mandateLeft(m.status),
+          })} disabled={!!busy} className="btn-link" style={{ color: "var(--revoke)" }}>
             {busy === "cancel" ? "Cancelling…" : m.status === "PROPOSED"
               ? `Cancel mandate · reclaim ${genFromWei(m.escrow_remaining_wei)} GEN`
               : "Cancel mandate · arms a window first"}

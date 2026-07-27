@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useTx, PHASE_COPY } from "@/lib/tx";
 import { useWallet } from "@/lib/wallet";
 import { shortAddr } from "@/lib/retinue";
 
 export function SiteHeader() {
   const { address, connect, disconnect, connecting, hasWallet, balanceWei } = useWallet();
+  const { pending } = useTx();
   return (
     <header
       className="sticky top-0 z-50 flex items-center justify-between px-4 lg:px-7 py-3"
@@ -33,6 +35,13 @@ export function SiteHeader() {
       </nav>
 
       <div className="flex items-center gap-3">
+        {/* Survives navigation, so leaving mid-transaction still shows work in flight. */}
+        {pending.length > 0 && (
+          <span className="tx-badge" title={pending.map((p) => p.label).join(", ")}>
+            <span className="tx-dot live" style={{ marginTop: 0 }} aria-hidden />
+            {pending.length === 1 ? PHASE_COPY[pending[0].phase] : `${pending.length} in flight`}
+          </span>
+        )}
         {address ? (
           <div className="flex items-center gap-3">
             <span className="hidden lg:inline mono text-xs ink tabular">

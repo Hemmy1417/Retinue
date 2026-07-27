@@ -287,12 +287,24 @@ export async function getOffersFor(address: string): Promise<Offer[]> {
 
 // ── writes ───────────────────────────────────────────────────────────────────
 
-async function writeAndWait<T>(
+/**
+ * Broadcast only — returns as soon as there is a hash.
+ *
+ * Split from the receipt wait so the UI can tell "your wallet is asking you to sign"
+ * apart from "the network is deciding". Collapsed, every action is one unexplained
+ * 40-second freeze.
+ */
+export async function submitWrite(
   client: Client, method: string, args: unknown[], value: bigint = BigInt(0),
-): Promise<T | null> {
+): Promise<string> {
   const hash = await client.writeContract({
     address: CONTRACT_ADDRESS, functionName: method, args, value,
   });
+  return String(hash);
+}
+
+/** Wait for consensus, surface contract reverts, and return the parsed payload. */
+export async function awaitReceipt<T>(client: Client, hash: string, method = ""): Promise<T | null> {
   const receipt = await client.waitForTransactionReceipt({
     hash, status: "ACCEPTED", interval: 5000, retries: 180,
   });
@@ -330,12 +342,20 @@ async function writeAndWait<T>(
   return null;
 }
 
+/** Submit and wait, for callers that don't need the phases separated. */
+export async function writeAndWait<T>(
+  client: Client, method: string, args: unknown[], value: bigint = BigInt(0),
+): Promise<T | null> {
+  const hash = await submitWrite(client, method, args, value);
+  return awaitReceipt<T>(client, hash, method);
+}
+
 export async function retain(
   client: Client, operator: string, title: string, template: string,
   brief: string, surfaces: string[], windows: number, totalWei: bigint,
   windowIntervalHours = 0,
-): Promise<Mandate | null> {
-  return writeAndWait<Mandate>(client, "retain",
+): Promise<string> {
+  return submitWrite(client, "retain",
     [operator, title, template, brief, JSON.stringify(surfaces), windows, windowIntervalHours], totalWei);
 }
 
@@ -343,13 +363,13 @@ export async function retain(
 // (20% of the retainer, min 0.02 GEN) — read it from the PROPOSED mandate.
 export async function acceptMandate(
   client: Client, mandateId: string, bondWei: bigint,
-): Promise<Mandate | null> {
-  return writeAndWait<Mandate>(client, "accept_mandate", [mandateId], bondWei);
+): Promise<string> {
+  return submitWrite(client, "accept_mandate", [mandateId], bondWei);
 }
 
 // Permissionless: reclaim a timed window the operator let go stale past its deadline.
-export async function forfeitWindow(client: Client, mandateId: string): Promise<unknown> {
-  return writeAndWait(client, "forfeit_window", [mandateId]);
+export async function forfeitWindow(client: Client, mandateId: string): Promise<string> {
+  return submitWrite(client, "forfeit_window", [mandateId]);
 }
 
 // The operator bond the contract will require at accept for a given mandate.
@@ -360,29 +380,26 @@ export function operatorBondRequired(m: { rate_wei: string; windows_total: numbe
   return pct > floor ? pct : floor;
 }
 
-export async function reviewWindow(client: Client, mandateId: string): Promise<Review | null> {
-  return writeAndWait<Review>(client, "review_window", [mandateId]);
+export async function reviewWindow(client: Client, mandateId: string): Promise<string> {
+  return submitWrite(client, "review_window", [mandateId]);
 }
 
 export async function appealRuling(
   client: Client, reviewId: string, instructions: string, bondWei: bigint,
-): Promise<Review | null> {
-  return writeAndWait<Review>(client, "appeal_ruling", [reviewId, instructions], bondWei);
+): Promise<string> {
+  return submitWrite(client, "appeal_ruling", [reviewId, instructions], bondWei);
 }
 
-export async function finalizeRevoke(client: Client, mandateId: string) {
-  return writeAndWait<{ mandate_id: string; refunded_wei: string; status: string }>(
-    client, "finalize_revoke", [mandateId]);
+export async function finalizeRevoke(client: Client, mandateId: string): Promise<string> {
+  return submitWrite(client, "finalize_revoke", [mandateId]);
 }
 
-export async function cancelMandate(client: Client, mandateId: string) {
-  return writeAndWait<{ mandate_id: string; refunded_wei: string; status: string }>(
-    client, "cancel_mandate", [mandateId]);
+export async function cancelMandate(client: Client, mandateId: string): Promise<string> {
+  return submitWrite(client, "cancel_mandate", [mandateId]);
 }
 
-export async function finalizeCancel(client: Client, mandateId: string) {
-  return writeAndWait<{ mandate_id: string; refunded_wei: string; status: string }>(
-    client, "finalize_cancel", [mandateId]);
+export async function finalizeCancel(client: Client, mandateId: string): Promise<string> {
+  return submitWrite(client, "finalize_cancel", [mandateId]);
 }
 
 // ── v0.2: the Bench, offers, window notes ────────────────────────────────────
@@ -390,42 +407,41 @@ export async function finalizeCancel(client: Client, mandateId: string) {
 export async function registerOperator(
   client: Client, handle: string, bio: string,
   specialties: string[], rateHintWei: bigint, portfolio: string[],
-): Promise<OperatorProfile | null> {
-  return writeAndWait<OperatorProfile>(client, "register_operator",
+): Promise<string> {
+  return submitWrite(client, "register_operator",
     [handle, bio, JSON.stringify(specialties), rateHintWei.toString(), JSON.stringify(portfolio)]);
 }
 
 export async function proposeOffer(
   client: Client, operator: string, title: string, template: string,
   brief: string, surfaces: string[], windows: number, rateWei: bigint, note: string,
-): Promise<Offer | null> {
-  return writeAndWait<Offer>(client, "propose_offer",
+): Promise<string> {
+  return submitWrite(client, "propose_offer",
     [operator, title, template, brief, JSON.stringify(surfaces), windows, rateWei.toString(), note]);
 }
 
 export async function counterOffer(
   client: Client, offerId: string, brief: string, surfaces: string[],
   windows: number, rateWei: bigint, note: string,
-): Promise<Offer | null> {
-  return writeAndWait<Offer>(client, "counter_offer",
+): Promise<string> {
+  return submitWrite(client, "counter_offer",
     [offerId, brief, JSON.stringify(surfaces), windows, rateWei.toString(), note]);
 }
 
-export async function acceptOffer(client: Client, offerId: string): Promise<Offer | null> {
-  return writeAndWait<Offer>(client, "accept_offer", [offerId]);
+export async function acceptOffer(client: Client, offerId: string): Promise<string> {
+  return submitWrite(client, "accept_offer", [offerId]);
 }
 
-export async function withdrawOffer(client: Client, offerId: string): Promise<Offer | null> {
-  return writeAndWait<Offer>(client, "withdraw_offer", [offerId]);
+export async function withdrawOffer(client: Client, offerId: string): Promise<string> {
+  return submitWrite(client, "withdraw_offer", [offerId]);
 }
 
-export async function retainFromOffer(client: Client, offerId: string, totalWei: bigint): Promise<Mandate | null> {
-  return writeAndWait<Mandate>(client, "retain_from_offer", [offerId], totalWei);
+export async function retainFromOffer(client: Client, offerId: string, totalWei: bigint): Promise<string> {
+  return submitWrite(client, "retain_from_offer", [offerId], totalWei);
 }
 
 export async function postWindowNote(client: Client, mandateId: string, note: string) {
-  return writeAndWait<{ mandate_id: string; window_note: string }>(
-    client, "post_window_note", [mandateId, note]);
+  return submitWrite(client, "post_window_note", [mandateId, note]);
 }
 
 

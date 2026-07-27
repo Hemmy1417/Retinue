@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useWallet } from "@/lib/wallet";
-import { getBench, registerOperator, genFromWei, genToWei, shortAddr, type OperatorProfile } from "@/lib/retinue";
+import { useTx } from "@/lib/tx";
+import { getBench, registerOperator, genFromWei, genToWei, shortAddr, awaitReceipt, type OperatorProfile } from "@/lib/retinue";
 import { Stat } from "@/components/Bits";
 
 function grade(p: OperatorProfile): { label: string; color: string } {
@@ -17,6 +18,7 @@ function grade(p: OperatorProfile): { label: string; color: string } {
 
 export default function BenchPage() {
   const { address, client, connect } = useWallet();
+  const tx = useTx();
   const [bench, setBench] = useState<OperatorProfile[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [handle, setHandle] = useState("");

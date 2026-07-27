@@ -165,3 +165,51 @@ textarea.field { resize: vertical; min-height: 4.5rem; }
 @media (prefers-reduced-motion: reduce) {
   .fade-in { animation: none; }
 }
+
+/* ── transaction lifecycle ─────────────────────────────────────────────────
+   Fixed bottom-right so a transaction that takes 40s survives navigation:
+   leaving the page mid-settlement must not look like the action vanished. */
+.tx-toasts {
+  position: fixed; right: 1rem; bottom: 1rem; z-index: 60;
+  display: flex; flex-direction: column-reverse; gap: 0.5rem;
+  width: min(23rem, calc(100vw - 2rem));
+}
+.tx-toast {
+  padding: 0.7rem 0.8rem; background: var(--s1);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.14);
+  animation: tx-in 0.22s ease-out;
+}
+@keyframes tx-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.tx-dot { width: 8px; height: 8px; border-radius: 999px; margin-top: 0.4rem; flex: none; }
+.tx-dot.live { background: var(--signal); animation: tx-pulse 1.1s ease-in-out infinite; }
+.tx-dot.ok   { background: var(--release); }
+.tx-dot.bad  { background: var(--revoke); }
+@keyframes tx-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+.tx-x {
+  margin-left: auto; color: var(--muted); font-size: 1rem; line-height: 1;
+  background: none; border: 0; cursor: pointer; padding: 0 0.15rem;
+}
+.tx-x:hover { color: var(--ink); }
+
+.tx-rail { display: flex; gap: 3px; margin-top: 0.45rem; }
+.tx-tick { height: 2px; flex: 1; border-radius: 2px; background: var(--line); }
+.tx-tick.past { background: var(--signal); }
+.tx-tick.now  { background: var(--signal); animation: tx-pulse 1.1s ease-in-out infinite; }
+
+/* A value that just changed on-chain gets one accent sweep, so the eye is told
+   WHERE to look after a confirmation instead of hunting the page for a diff. */
+.flash { animation: tx-flash 1.6s ease-out; border-radius: 4px; }
+@keyframes tx-flash {
+  0%   { background: color-mix(in srgb, var(--signal) 34%, transparent); }
+  100% { background: transparent; }
+}
+
+.tx-badge {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font-family: var(--font-mono); font-size: 0.62rem;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 0.2rem 0.5rem; border-radius: var(--radius-sm);
+  border: 1px solid var(--signal); color: var(--signal);
+}

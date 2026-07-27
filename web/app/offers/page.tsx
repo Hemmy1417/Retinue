@@ -4,9 +4,10 @@ import Link from "next/link";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useWallet } from "@/lib/wallet";
+import { useTx } from "@/lib/tx";
 import {
   getOffersFor, proposeOffer, counterOffer, acceptOffer, withdrawOffer, retainFromOffer,
-  genFromWei, genToWei, shortAddr, type Offer, docketNo} from "@/lib/retinue";
+  genFromWei, genToWei, shortAddr, awaitReceipt, type Offer, docketNo} from "@/lib/retinue";
 
 const STATUS_COLOR: Record<string, string> = {
   OPEN: "var(--warn)", AGREED: "var(--release)", FUNDED: "var(--signal)", WITHDRAWN: "var(--muted)",
@@ -15,6 +16,7 @@ const STATUS_COLOR: Record<string, string> = {
 function OffersInner() {
   const qs = useSearchParams();
   const { address, client, connect } = useWallet();
+  const tx = useTx();
   const [offers, setOffers] = useState<Offer[]>([]);
   const [showForm, setShowForm] = useState(!!qs.get("to"));
   const [busy, setBusy] = useState("");
@@ -40,13 +42,44 @@ function OffersInner() {
   }, [address]);
   useEffect(() => { load(); }, [load]);
 
-  async function run(label: string, fn: () => Promise<unknown>) {
+  /**
+   * `settled` polls a contract view until the change is readable — a GenLayer receipt
+   * says ACCEPTED, not "views updated", so refreshing on the receipt alone re-renders
+   * the same pre-transaction state and the table looks untouched.
+   */
+  async function run(
+    tag: string,
+    opts: {
+      label: string; detail?: string; effect?: string;
+      send: () => Promise<string>;
+      settled?: () => Promise<boolean>;
+    },
+  ) {
     if (!client) return connect().catch(() => {});
-    setErr(""); setBusy(label);
-    try { await fn(); load(); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-    finally { setBusy(""); }
+    setErr(""); setBusy(tag);
+    try {
+      await tx.run({
+        label: opts.label,
+        detail: opts.detail,
+        effect: opts.effect,
+        send: opts.send,
+        confirm: (h) => awaitReceipt(client, h),
+        settled: opts.settled,
+        onSettled: load,
+      });
+    } catch {
+      /* the toast owns the error */
+    } finally {
+      setBusy("");
+    }
   }
+
+  /** Poll until this offer's status actually moves off what it was. */
+  const offerLeft = (id: string, from: string) => async () => {
+    const all = await getOffersFor(address).catch(() => []);
+    const o = all.find((x) => x.offer_id === id);
+    return !!o && o.status !== from;
+  };
 
   if (!address) {
     return (
@@ -115,11 +148,17 @@ function OffersInner() {
           <button
             className="btn btn-signal mt-4"
             disabled={busy === "propose" || brief.trim().length < 80}
-            onClick={() => run("propose", () => proposeOffer(
+            onClick={() => { const before = offers.length; return run("propose", {
+              label: "Send the offer",
+              detail: `${title.trim()} · ${rate || "0"} GEN per window`,
+              effect: "Offer sent — the operator moves next.",
+              send: () => proposeOffer(
               client, op.trim(), title.trim(), template, brief.trim(),
               surfaces.split("\n").map((u) => u.trim()).filter(Boolean).slice(0, 3),
               Number(windows), genToWei(rate || "0"), note.trim(),
-            ))}
+            ),
+              settled: async () => (await getOffersFor(address).catch(() => [])).length > before,
+            }); }}
           >
             {busy === "propose" ? "Placing on the table…" : `Propose · total ${(Number(windows) || 0) * (Number(rate) || 0)} GEN unfunded`}
           </button>
@@ -161,7 +200,13 @@ function OffersInner() {
                     <>
                       <button className="btn btn-signal" style={{ fontSize: "0.76rem", padding: "0.4rem 0.8rem" }}
                         disabled={!!busy}
-                        onClick={() => run("accept", () => acceptOffer(client, o.offer_id))}>
+                        onClick={() => run("accept", {
+                          label: "Accept the terms",
+                          detail: `Offer ${docketNo(o.offer_id)} · ${o.title}`,
+                          effect: "Agreed — the client can now fund it into a mandate.",
+                          send: () => acceptOffer(client, o.offer_id),
+                          settled: offerLeft(o.offer_id, o.status),
+                        })}>
                         {busy === "accept" ? "Signing…" : `Accept ${o.last_editor}'s terms`}
                       </button>
                       <button className="btn-ghost" style={{ fontSize: "0.76rem", padding: "0.4rem 0.8rem" }}
@@ -173,7 +218,13 @@ function OffersInner() {
                   {o.status === "AGREED" && meClient && (
                     <button className="btn btn-signal" style={{ fontSize: "0.76rem", padding: "0.4rem 0.8rem" }}
                       disabled={!!busy}
-                      onClick={() => run("fund", () => retainFromOffer(client, o.offer_id, total))}>
+                      onClick={() => run("fund", {
+                        label: "Fund the mandate",
+                        detail: `${o.title} · ${genFromWei(total.toString())} GEN escrowed`,
+                        effect: "Funded — the mandate is open and awaiting operator acceptance.",
+                        send: () => retainFromOffer(client, o.offer_id, total),
+                        settled: offerLeft(o.offer_id, o.status),
+                      })}>
                       {busy === "fund" ? "Escrowing…" : `Fund · ${genFromWei(total.toString())} GEN → live mandate`}
                     </button>
                   )}
@@ -183,7 +234,13 @@ function OffersInner() {
                   {(o.status === "OPEN" || o.status === "AGREED") && (
                     <button className="btn-ghost" style={{ fontSize: "0.76rem", padding: "0.4rem 0.8rem" }}
                       disabled={!!busy}
-                      onClick={() => run("withdraw", () => withdrawOffer(client, o.offer_id))}>
+                      onClick={() => run("withdraw", {
+                        label: "Withdraw the offer",
+                        detail: `Offer ${docketNo(o.offer_id)} · ${o.title}`,
+                        effect: "Withdrawn — the table is clear.",
+                        send: () => withdrawOffer(client, o.offer_id),
+                        settled: offerLeft(o.offer_id, o.status),
+                      })}>
                       Walk away
                     </button>
                   )}
@@ -209,9 +266,19 @@ function OffersInner() {
                     </div>
                     <button className="btn btn-signal mt-3" style={{ fontSize: "0.76rem" }}
                       disabled={!!busy}
-                      onClick={() => run("counter", () => counterOffer(
+                      onClick={() => { const rounds = o.rounds; return run("counter", {
+                        label: "Send a counter",
+                        detail: `Offer ${docketNo(o.offer_id)} · ${cRate || "0"} GEN per window`,
+                        effect: "Countered — it is now the other side's move.",
+                        send: () => counterOffer(
                         client, o.offer_id, o.brief, o.surfaces, o.windows, genToWei(cRate || "0"), cNote.trim(),
-                      ))}>
+                      ),
+                        settled: async () => {
+                          const all = await getOffersFor(address).catch(() => []);
+                          const x = all.find((y) => y.offer_id === o.offer_id);
+                          return !!x && x.rounds > rounds;
+                        },
+                      }); }}>
                       {busy === "counter" ? "Countering…" : "Send counter"}
                     </button>
                   </div>

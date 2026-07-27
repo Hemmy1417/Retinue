@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Archivo, Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { WalletProvider } from "@/lib/wallet";
+import { TxProvider } from "@/lib/tx";
 import { SiteHeader } from "@/components/SiteHeader";
 
 const archivo = Archivo({ subsets: ["latin"], variable: "--font-archivo", display: "swap", weight: ["500", "600", "700"] });
@@ -19,8 +20,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${archivo.variable} ${inter.variable} ${plexmono.variable}`}>
       <body>
         <WalletProvider>
-          <SiteHeader />
-          <main>{children}</main>
+          {/* Inside the wallet provider so a transaction toast can outlive the page
+              that started it — a 40s settlement must not vanish on navigation. */}
+          <TxProvider>
+            <SiteHeader />
+            <main>{children}</main>
+          </TxProvider>
         </WalletProvider>
       </body>
     </html>

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { RULING_META, STATUS_META, TEMPLATE_META } from "@/lib/config";
 import { genFromWei, shortAddr, type Mandate, type Review, docketNo} from "@/lib/retinue";
@@ -102,4 +103,27 @@ export function ReviewEntry({ rv }: { rv: Review }) {
       )}
     </div>
   );
+}
+
+/**
+ * Wraps a value that changes as a result of an on-chain write and gives it one
+ * accent sweep when it does.
+ *
+ * Without this, a confirmed transaction repaints a number somewhere on a dense page
+ * and the user has to hunt for the diff — which reads as "nothing happened". The
+ * flash is the answer to "what did my signature actually do?".
+ */
+export function Flash({ value, children }: { value: string | number; children: React.ReactNode }) {
+  const first = useRef(true);
+  const [on, setOn] = useState(false);
+
+  useEffect(() => {
+    // Never flash the initial paint — only a genuine change after mount.
+    if (first.current) { first.current = false; return; }
+    setOn(true);
+    const t = setTimeout(() => setOn(false), 1600);
+    return () => clearTimeout(t);
+  }, [value]);
+
+  return <span className={on ? "flash" : undefined}>{children}</span>;
 }

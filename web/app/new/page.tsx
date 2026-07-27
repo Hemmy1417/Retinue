@@ -3,14 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useWallet } from "@/lib/wallet";
+import { useTx } from "@/lib/tx";
 import { TEMPLATES, TEMPLATE_META, MIN_WINDOWS, MAX_WINDOWS, MAX_SURFACES } from "@/lib/config";
-import { retain, genToWei, genFromWei } from "@/lib/retinue";
+import { retain, genToWei, genFromWei, getMandatesForClient, awaitReceipt } from "@/lib/retinue";
 
 type Probe = { state: "idle" | "checking" | "ok" | "bad"; note: string };
 
 export default function NewMandate() {
   const router = useRouter();
   const { address, client, connect } = useWallet();
+  const tx = useTx();
 
   const [operator, setOperator] = useState("");
   const [title, setTitle] = useState("");
@@ -71,8 +73,24 @@ export default function NewMandate() {
     try {
       const ih = Number(intervalHours) || 0;
       if (ih !== 0 && (ih < 1 || ih > 2160)) { setBusy(false); return setErr("Timed cadence must be 0 (manual) or 1–2160 hours."); }
-      const m = await retain(client, operator.trim(), title.trim(), template, brief.trim(), surf, n, genToWei(total), ih);
-      router.push(m?.mandate_id ? `/m/${m.mandate_id}` : "/mandates");
+      // Remember what exists now so we can both detect the new mandate and open it.
+      const before = new Set((await getMandatesForClient(address).catch(() => [])).map((x) => x.mandate_id));
+      let created = "";
+      await tx.run({
+        label: "Open the mandate",
+        detail: `${title.trim()} · ${total} GEN escrowed`,
+        effect: `${total} GEN locked across ${n} window${n > 1 ? "s" : ""}. The operator must accept before anything is judged.`,
+        send: () => retain(client, operator.trim(), title.trim(), template, brief.trim(), surf, n, genToWei(total), ih),
+        confirm: (h) => awaitReceipt(client, h),
+        // Don't navigate on the receipt — the mandate the user just funded would 404.
+        settled: async () => {
+          const mine = await getMandatesForClient(address);
+          const fresh = mine.find((x) => !before.has(x.mandate_id));
+          if (fresh) created = fresh.mandate_id;
+          return !!fresh;
+        },
+        onSettled: () => { router.push(created ? `/m/${created}` : "/mandates"); },
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
       setBusy(false);
