@@ -209,6 +209,40 @@ The portable operator record was already written by every ruling; v0.4 makes it 
 
 ## Verified end-to-end
 
+### v0.5 - the four judge findings, each proven by attempting the exploit (2026-07-28)
+
+Every fix was tested by trying the attack it closes, against the live v0.5 contract with two
+signing wallets. Contract `0x90B4cef072E45e978F6265aAFAC0C3Fd7C4062DE`.
+
+```text
+bonded offers  -> funding an AGREED offer opened m_0 as PROPOSED with operator_bond_wei 0;
+                  review_window reverted ("the operator has not accepted this mandate")
+                  until the operator accepted and posted 0.03 GEN
+timed window   -> a review called before the period elapsed reverted
+                  ("this window is still in progress - the review unlocks in Ns")
+grace slot     -> forfeit inside the slot reverted with the countdown
+                  ("not forfeitable yet - 672s of the review grace slot left");
+                  the operator then ran the due review and was paid. Review beats
+                  forfeit inside the slot; the race has a defined winner
+snapshot appeal-> THE HEADLINE RUN. m_2 pinned a HASH-FREE gist URL, so a refetch
+                  would genuinely have seen new content. Panel ruled CONSTRAIN on a
+                  page carrying "$RETI token launching soon / 100x guaranteed / free
+                  NFT giveaway". The operator then DELETED that paragraph and appealed:
+                  "Re-read the page - there is no token promotion on it." True of the
+                  live page; false of the record. The second panel returned violations
+                  quoting the promo verbatim -> UPHELD, 0.01 GEN bond forfeited.
+                  The appeal panel described content that no longer exists on the live
+                  internet: it read the snapshot, not the web. Under a refetching
+                  design this appeal flips to RELEASE and the exploit succeeds.
+due process    -> that appeal panel returned REVOKE (harsher than the original
+                  CONSTRAIN) and the contract did NOT apply it - only a strictly better
+                  ruling flips. Appealing can cost the bond; it can never worsen the
+                  ruling
+integrity      -> evidence_hash == sha256(evidence_digest) verified on every review
+```
+
+### v0.4 baseline run
+
 Two-wallet stress test against the live v0.4 contract - every feature driven on-chain, client and
 operator as separate signing wallets (2026-07-26):
 
@@ -236,7 +270,7 @@ An earlier full-stack run (2026-07-14) covered the negotiation path end-to-end: 
 accept -> funded at the exact agreed total, plus a REVOKE armed, survived its appeal window, and
 refunded the remainder.
 
-**58 direct-mode tests.**
+**64 direct-mode tests**, including one per judge finding.
 
 ## Tech stack
 
