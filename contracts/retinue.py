@@ -1,4 +1,4 @@
-# v0.4.0
+# v0.5.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 from genlayer import *
@@ -67,12 +67,19 @@ MAX_NOTE = 600
 
 # A REVOKE never refunds in the same breath: it arms, and finalize_revoke
 # executes only after this many protocol actions (or an upheld appeal).
-APPEAL_WINDOW_ACTIONS = 2
+# v0.5: windows are WALL-CLOCK, not action-counted. The old action-counter
+# design let ANY unrelated write (a bench registration, a note on another
+# mandate) tick an operator's appeal window shut — activity by strangers was
+# eroding a party's due process. Time belongs to everyone equally.
+APPEAL_WINDOW_SECONDS = 6 * 3600
 
 # A client cancel on a live mandate arms the same way — the operator keeps
 # the right to run the due review (and be paid for work already delivered)
 # while the cancel is pending. Drive-by cancels don't snipe earned windows.
-CANCEL_WINDOW_ACTIONS = 2
+CANCEL_WINDOW_SECONDS = 6 * 3600
+FORFEIT_GRACE_SECONDS = 3600   # after a timed window elapses, the operator has
+                               # this long to run the due review before anyone
+                               # can forfeit it — review and forfeit never race
 
 # Operator performance bond (v0.3): staked at accept, symmetric skin in the
 # game. Returned in full on a clean COMPLETED; slashed to the client on a final
@@ -474,19 +481,32 @@ class Retinue(gl.Contract):
         constraint = _clip(m.get("constraint_note"), 400)
 
         def observe():
-            blocks = []
-            for i, url in enumerate(surfaces):
-                # One dead surface must not kill the round — fetch what loads
-                # and let missing content be judged as missing content.
-                try:
-                    page = gl.nondet.web.render(url, mode="text")
-                    blocks.append(f"--- SURFACE #{i+1} ({url}) ---\n{(page or '')[:6000]}\n")
-                except Exception as e:
-                    blocks.append(
-                        f"--- SURFACE #{i+1} ({url}) ---\n"
-                        f"[UNREACHABLE by validators — treat as missing content: {str(e)[:150]}]\n"
-                    )
-            evidence = "\n".join(blocks)
+            if appeal_ctx and appeal_ctx.get("snapshot"):
+                # APPEAL ROUND (v0.5): the evidence is the hash-verified snapshot
+                # the original panel recorded — the pages are NOT refetched. An
+                # appeal argues the first panel MISREAD the evidence, so both
+                # panels must read the same evidence; live pages may have changed
+                # since the ruling and are inadmissible in this round.
+                evidence = (
+                    "IMMUTABLE EVIDENCE SNAPSHOT (recorded by the original panel at "
+                    "ruling time; integrity-verified against its on-chain hash; the "
+                    "live surfaces are deliberately NOT refetched for an appeal):\n"
+                    + appeal_ctx["snapshot"]
+                )
+            else:
+                blocks = []
+                for i, url in enumerate(surfaces):
+                    # One dead surface must not kill the round — fetch what loads
+                    # and let missing content be judged as missing content.
+                    try:
+                        page = gl.nondet.web.render(url, mode="text")
+                        blocks.append(f"--- SURFACE #{i+1} ({url}) ---\n{(page or '')[:6000]}\n")
+                    except Exception as e:
+                        blocks.append(
+                            f"--- SURFACE #{i+1} ({url}) ---\n"
+                            f"[UNREACHABLE by validators — treat as missing content: {str(e)[:150]}]\n"
+                        )
+                evidence = "\n".join(blocks)
 
             appeal_block = ""
             if appeal_ctx:
@@ -829,9 +849,12 @@ Respond ONLY with JSON:
         """
         Fund an AGREED offer into a live mandate. The value must equal the
         agreed total exactly, and the terms are copied verbatim from the
-        table — nothing renegotiates itself at funding time. Because both
-        sides signed the terms, the mandate starts ACTIVE: consent was the
-        negotiation itself.
+        table — nothing renegotiates itself at funding time. The TERMS were
+        consented to at the table, but the performance bond is a separate
+        economic act: the mandate starts PROPOSED and goes live only when the
+        operator accepts and posts the bond, exactly like a direct retainer.
+        (v0.5 — previously this path skipped the bond entirely, leaving
+        negotiated mandates unbonded.)
         """
         o = self._offer(offer_id)
         client = str(gl.message.sender_address)
@@ -852,7 +875,7 @@ Respond ONLY with JSON:
             client=o["client"], operator=o["operator"], title=o["title"],
             template=o["template"], brief=o["brief"], surfaces=o["surfaces"],
             windows=int(o["windows"]), total=total,
-            status="ACTIVE", offer_id=offer_id,
+            status="PROPOSED", offer_id=offer_id,
         )
         o["status"] = "FUNDED"
         o["mandate_id"] = m["mandate_id"]
@@ -1020,6 +1043,23 @@ Respond ONLY with JSON:
         if int(m["windows_done"]) >= int(m["windows_total"]):
             raise gl.vm.UserError("all windows already reviewed")
 
+        # v0.5: on a timed cadence a window is judged AFTER its period elapses —
+        # a review is a verdict on a period of standing supervision, and the
+        # period has to exist before it can be judged. Without this gate the
+        # operator could burn every window in a minute and drain the retainer
+        # for supervision-time that never happened.
+        interval = int(m.get("window_interval_seconds", 0))
+        deadline = int(m.get("window_deadline_epoch", 0))
+        if interval > 0 and deadline > 0:
+            now = self._utc_now()
+            if now == 0:
+                raise gl.vm.UserError("the clock is unavailable; try again shortly")
+            if now < deadline:
+                raise gl.vm.UserError(
+                    f"this window is still in progress — the review unlocks in "
+                    f"{deadline - now}s, when the period it judges has elapsed"
+                )
+
         verdict = self._run_panel(m)
         if verdict["ruling"] == "INCONCLUSIVE":
             # LLM-outage fail-safe: a no-op. Nothing paid, no strike, the
@@ -1090,7 +1130,10 @@ Respond ONLY with JSON:
             self._bump(m["operator"], "constrains")
         else:  # REVOKE — arms; the money moves only through finalize_revoke
             m["status"] = "REVOKE_PENDING"
-            m["revoke_armed_at"] = int(self.action_counter)
+            # Armed on the WALL CLOCK. 0 = the clock was out; finalize_revoke
+            # self-heals by anchoring on its own first call rather than letting
+            # an unanchored window stay open (or shut) forever.
+            m["revoke_armed_at"] = self._utc_now()
 
         m["review_ids"] = m.get("review_ids", []) + [review_id]
         m["window_note"] = ""   # every window speaks for itself
@@ -1136,6 +1179,21 @@ Respond ONLY with JSON:
                 f"appeal bond too small: {required} wei required (1% of the window rate, min {MIN_APPEAL_BOND_WEI})"
             )
 
+        # v0.5: an appeal re-examines WHAT WAS ACTUALLY JUDGED — the immutable
+        # evidence snapshot the original panel recorded — never a live refetch.
+        # Refetching let the surfaces change between ruling and appeal: an
+        # operator could fix the page after a WARN and appeal against evidence
+        # the first panel never saw. The snapshot is integrity-checked against
+        # its stored hash before the second panel reads a word of it.
+        snapshot = rv.get("evidence_digest", "") or ""
+        stored_hash = rv.get("evidence_hash", "") or ""
+        if not snapshot or not stored_hash:
+            raise gl.vm.UserError(
+                "this review carries no evidence snapshot — it predates v0.3 and cannot be appealed"
+            )
+        if hashlib.sha256(snapshot.encode("utf-8")).hexdigest() != stored_hash:
+            raise gl.vm.UserError("evidence snapshot integrity check failed — the record does not verify")
+
         original = {
             "ruling":     rv["ruling"],
             "compliance": rv["compliance"],
@@ -1143,7 +1201,8 @@ Respond ONLY with JSON:
             "violations": rv["violations"],
             "summary":    rv["summary"],
         }
-        verdict = self._run_panel(m, appeal_ctx={"original": original, "note": note})
+        verdict = self._run_panel(
+            m, appeal_ctx={"original": original, "note": note, "snapshot": snapshot})
         if verdict["ruling"] == "INCONCLUSIVE":
             raise gl.vm.UserError("appeal round inconclusive (LLM provider error) — bond not taken, try again")
 
@@ -1234,12 +1293,26 @@ Respond ONLY with JSON:
         last = self._review(ids[-1]) if ids else None
         appeal_resolved = bool(last and last.get("appealed") and last.get("appeal_outcome") == "UPHELD")
 
-        elapsed = int(self.action_counter) - int(m.get("revoke_armed_at", 0))
-        if not appeal_resolved and elapsed < APPEAL_WINDOW_ACTIONS:
-            raise gl.vm.UserError(
-                f"appeal window still open — {APPEAL_WINDOW_ACTIONS - elapsed} more protocol "
-                f"action(s) must elapse (or the operator's appeal resolve) before the revoke executes"
-            )
+        if not appeal_resolved:
+            now = self._utc_now()
+            if now == 0:
+                raise gl.vm.UserError("the clock is unavailable; try again shortly")
+            armed = int(m.get("revoke_armed_at", 0))
+            if armed == 0:
+                # The arming call could not reach a clock. Anchor the window NOW
+                # and make the caller wait it out — due process needs a start time.
+                m["revoke_armed_at"] = now
+                self._save_mandate(m)
+                raise gl.vm.UserError(
+                    f"the appeal window had no clock anchor — it is now armed; "
+                    f"retry after {APPEAL_WINDOW_SECONDS // 3600}h (or the operator's appeal resolves it)"
+                )
+            if now < armed + APPEAL_WINDOW_SECONDS:
+                left = armed + APPEAL_WINDOW_SECONDS - now
+                raise gl.vm.UserError(
+                    f"appeal window still open — {left}s remain (or the operator's "
+                    f"appeal resolves it) before the revoke executes"
+                )
 
         refunded = self._refund_remaining(m)
         # The operator failed: their bond is slashed to the client.
@@ -1281,7 +1354,7 @@ Respond ONLY with JSON:
             raise gl.vm.UserError(f"mandate status is {m['status']} — cannot cancel")
 
         m["status"] = "CANCEL_PENDING"
-        m["cancel_armed_at"] = int(self.action_counter)
+        m["cancel_armed_at"] = self._utc_now()   # 0 self-heals in finalize_cancel
         self._save_mandate(m)
         return json.dumps({"mandate_id": mandate_id,
                            "refunded_wei": "0",
@@ -1300,11 +1373,22 @@ Respond ONLY with JSON:
         if m["status"] != "CANCEL_PENDING":
             raise gl.vm.UserError(f"mandate status is {m['status']}, not CANCEL_PENDING")
 
-        elapsed = int(self.action_counter) - int(m.get("cancel_armed_at", 0))
-        if elapsed < CANCEL_WINDOW_ACTIONS:
+        now = self._utc_now()
+        if now == 0:
+            raise gl.vm.UserError("the clock is unavailable; try again shortly")
+        armed = int(m.get("cancel_armed_at", 0))
+        if armed == 0:
+            m["cancel_armed_at"] = now
+            self._save_mandate(m)
             raise gl.vm.UserError(
-                f"cancel window still open — {CANCEL_WINDOW_ACTIONS - elapsed} more protocol "
-                f"action(s) must elapse (the operator may still run the due review) before the cancel executes"
+                f"the cancel window had no clock anchor — it is now armed; "
+                f"retry after {CANCEL_WINDOW_SECONDS // 3600}h (the operator may still run the due review)"
+            )
+        if now < armed + CANCEL_WINDOW_SECONDS:
+            left = armed + CANCEL_WINDOW_SECONDS - now
+            raise gl.vm.UserError(
+                f"cancel window still open — {left}s remain (the operator may "
+                f"still run the due review) before the cancel executes"
             )
 
         refunded = self._refund_remaining(m)
@@ -1342,8 +1426,12 @@ Respond ONLY with JSON:
         now = self._utc_now()
         if now == 0:
             raise gl.vm.UserError("the clock is unavailable; try again shortly")
-        if now <= deadline:
-            raise gl.vm.UserError(f"the window is not overdue — {deadline - now}s remain")
+        if now <= deadline + FORFEIT_GRACE_SECONDS:
+            left = deadline + FORFEIT_GRACE_SECONDS - now
+            raise gl.vm.UserError(
+                f"not forfeitable yet — the operator has {left}s of the review "
+                f"grace slot left (window elapse + {FORFEIT_GRACE_SECONDS // 60}min)"
+            )
 
         # Reclaim this window's tranche for the client, consume the window,
         # strike + record the miss. The operator is paid nothing for a window
@@ -1516,8 +1604,9 @@ Respond ONLY with JSON:
             "windows_range":   [MIN_WINDOWS, MAX_WINDOWS],
             "appeal_bond_bps": APPEAL_BOND_BPS,
             "min_appeal_bond_wei": str(MIN_APPEAL_BOND_WEI),
-            "appeal_window_actions": APPEAL_WINDOW_ACTIONS,
-            "cancel_window_actions": CANCEL_WINDOW_ACTIONS,
+            "appeal_window_seconds": APPEAL_WINDOW_SECONDS,
+            "cancel_window_seconds": CANCEL_WINDOW_SECONDS,
+            "forfeit_grace_seconds": FORFEIT_GRACE_SECONDS,
             "strikes_to_escalate": STRIKES_TO_ESCALATE,
             "operator_bond_bps": OPERATOR_BOND_BPS,
             "min_operator_bond_wei": str(MIN_OPERATOR_BOND_WEI),

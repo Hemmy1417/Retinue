@@ -193,10 +193,10 @@ export default function MandateFile({ params }: { params: Promise<{ id: string }
             <div className="eyebrow mb-1">Timed cadence · {Math.round(Number(m.window_interval_seconds) / 3600)}h per window</div>
             <p className="text-sm">
               {dl <= 0
-                ? "Deadline not armed yet — run the first review to anchor the clock."
+                ? "Deadline not armed yet — the clock anchors at acceptance."
                 : overdue
-                ? "This window is overdue. Anyone can forfeit it — the tranche returns to the client and a miss lands on the operator's record."
-                : `Next window due in ~${hrs}h.`}
+                ? "The period has elapsed. The operator has a 1h grace slot to run the due review; after it, anyone can forfeit — the tranche returns to the client and a miss lands on the operator's record."
+                : `Window in progress — the review unlocks in ~${hrs}h, once the period it judges has elapsed.`}
               {m.forfeits_count > 0 && <span className="mono muted"> · {m.forfeits_count} forfeited</span>}
             </p>
             {overdue && (

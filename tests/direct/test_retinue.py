@@ -163,8 +163,11 @@ BRIEF = ("Run the Example brand blog: two posts per window on developer tooling,
          "founder voice, no politics, no token shilling, no giveaways.")
 
 
+BASE = 1_790_000_000
+
+
 def _verdict(ruling="RELEASE", injection="NONE", constraint="", disclosure="N_A",
-             evidence_digest=""):
+             evidence_digest="Surface #1 carried the two mandated posts, on-brief."):
     return json.dumps({
         "mandate_compliance": "ON", "presence": "ACTIVE",
         "prohibited_content": "NONE", "injection_attempt": injection,
@@ -428,17 +431,24 @@ def test_revoke_arms_but_moves_nothing(module, c):
 
 
 def test_finalize_revoke_blocked_inside_window(module, c):
+    _NOW[0] = BASE
     m = _retain(module, c)
     _review(module, c, m["mandate_id"], "REVOKE")
+    # v0.5: unrelated protocol activity must NOT close the window —
+    # hammer the contract with strangers' writes and stay inside 6h.
+    _retain(module, c, total=GEN, windows=2)
+    _propose(module, c)
+    _NOW[0] = BASE + 5 * 3600
     _as(module, CLIENT)
     with pytest.raises(module.gl.vm.UserError, match="appeal window still open"):
         c.finalize_revoke(m["mandate_id"])
 
 
 def test_finalize_revoke_after_window_refunds_client(module, c):
+    _NOW[0] = BASE
     m = _retain(module, c)
     _review(module, c, m["mandate_id"], "REVOKE")
-    _retain(module, c, total=GEN, windows=2)             # unrelated action ticks the window
+    _NOW[0] = BASE + 6 * 3600 + 60                       # the WINDOW elapsed — time, not activity
     _as(module, CLIENT)
     out = json.loads(c.finalize_revoke(m["mandate_id"]))
     assert out["status"] == "REVOKED"
@@ -469,22 +479,27 @@ def test_cancel_on_live_mandate_arms_not_refunds(module, c):
 
 
 def test_finalize_cancel_blocked_inside_window(module, c):
+    _NOW[0] = BASE
     m = _retain(module, c)
     _as(module, CLIENT)
     c.cancel_mandate(m["mandate_id"])
+    _NOW[0] = BASE + 5 * 3600                            # inside the 6h window
+    _as(module, CLIENT)
     with pytest.raises(module.gl.vm.UserError, match="cancel window still open"):
         c.finalize_cancel(m["mandate_id"])
 
 
 def test_operator_earns_due_window_during_cancel_pending(module, c):
+    _NOW[0] = BASE
     m = _retain(module, c)
     _as(module, CLIENT)
-    c.cancel_mandate(m["mandate_id"])                    # armed
+    c.cancel_mandate(m["mandate_id"])                    # armed on the clock
     # the operator can still run the due review and be paid during the window
     rv = _review(module, c, m["mandate_id"], "RELEASE")
     assert rv["ruling"] == "RELEASE"
     assert _GL._emit.total_to(OPERATOR) == GEN
-    # window elapsed via the review itself + finalize's tick -> cancel executes
+    _NOW[0] = BASE + 6 * 3600 + 60                       # the WINDOW elapsed
+    _as(module, CLIENT)
     out = json.loads(c.finalize_cancel(m["mandate_id"]))
     assert out["status"] == "CANCELLED"
     assert int(out["refunded_wei"]) == 3 * GEN           # rest home to the client
@@ -602,10 +617,12 @@ def test_appeal_injection_floor_applies_on_second_round_too(module, c):
 # ── solvency & views ─────────────────────────────────────────────────────────
 
 def test_solvency_book_balances(module, c):
+    _NOW[0] = BASE
     m = _retain(module, c)                               # +4 escrow
     _review(module, c, m["mandate_id"], "RELEASE")       # -1 to operator
     _review(module, c, m["mandate_id"], "REVOKE")
-    _retain(module, c, total=2 * GEN, windows=2)         # +2 escrow (also ticks)
+    _retain(module, c, total=2 * GEN, windows=2)         # +2 escrow, window unmoved
+    _NOW[0] = BASE + 6 * 3600 + 60
     _as(module, CLIENT)
     c.finalize_revoke(m["mandate_id"])                   # -3 refund
     stats = json.loads(c.get_stats())
@@ -728,11 +745,21 @@ def test_retain_from_offer_funds_exactly_and_skips_accept(module, c):
 
     _as(module, CLIENT, value=4 * GEN)
     m = json.loads(c.retain_from_offer(o["offer_id"]))
-    # consent was the negotiation: the mandate starts ACTIVE, no accept step
-    assert m["status"] == "ACTIVE"
+    # v0.5: terms were negotiated, but the PERFORMANCE BOND was not — the
+    # mandate starts PROPOSED and nothing can be judged until the operator
+    # accepts and posts it, exactly like a direct retainer.
+    assert m["status"] == "PROPOSED"
+    assert m["operator_bond_wei"] == "0"
     assert m["offer_id"] == o["offer_id"]
     assert json.loads(c.get_offer(o["offer_id"]))["status"] == "FUNDED"
-    # and it reviews immediately
+    with pytest.raises(module.gl.vm.UserError, match="not accepted"):
+        _as(module, CLIENT)
+        c.review_window(m["mandate_id"])
+    q = json.loads(c.quote_accept(m["mandate_id"]))
+    _as(module, OPERATOR, value=int(q["required_bond_wei"]))
+    m2 = json.loads(c.accept_mandate(m["mandate_id"]))
+    assert m2["status"] == "ACTIVE"
+    assert int(m2["operator_bond_wei"]) > 0              # the bond exists now
     rv = _review(module, c, m["mandate_id"])
     assert rv["ruling"] == "RELEASE"
     assert _GL._emit.total_to(OPERATOR) == GEN
@@ -824,12 +851,11 @@ def test_bonds_held_tracked_in_stats(module, c):
 
 
 def test_bond_returned_to_operator_on_client_cancel(module, c):
+    _NOW[0] = BASE
     m = _retain(module, c)                       # accepted, bond posted
     mid = m["mandate_id"]
-    _as(module, CLIENT); c.cancel_mandate(mid)   # ACTIVE cancel arms
-    # tick past the cancel window with unaccepted retains (they post no bond)
-    _retain(module, c, total=GEN, windows=2, accept=False)
-    _retain(module, c, total=GEN, windows=2, accept=False)
+    _as(module, CLIENT); c.cancel_mandate(mid)   # ACTIVE cancel arms on the clock
+    _NOW[0] = BASE + 6 * 3600 + 60               # the window elapsed — time, not ticks
     _as(module, CLIENT)
     out = json.loads(c.finalize_cancel(mid))
     assert out["status"] == "CANCELLED"
@@ -839,8 +865,7 @@ def test_bond_returned_to_operator_on_client_cancel(module, c):
 
 
 # ── v0.3 — timed review windows + permissionless forfeit ──────────────────────
-
-BASE = 1_790_000_000
+# (BASE is defined near the top of the file since v0.5 wall-clock windows.)
 
 
 def test_timed_accept_arms_deadline(module, c):
@@ -860,7 +885,7 @@ def test_forfeit_before_deadline_reverts(module, c):
     _NOW[0] = BASE
     m = _retain(module, c, interval=24)
     _NOW[0] = BASE + 12 * 3600                    # only 12h in
-    with pytest.raises(module.gl.vm.UserError, match="not overdue"):
+    with pytest.raises(module.gl.vm.UserError, match="not forfeitable yet"):
         c.forfeit_window(m["mandate_id"])
 
 
@@ -868,7 +893,7 @@ def test_forfeit_overdue_reclaims_window_for_client(module, c):
     _NOW[0] = BASE
     m = _retain(module, c, interval=24)          # rate 1 GEN/window
     mid = m["mandate_id"]
-    _NOW[0] = BASE + 25 * 3600                    # overdue
+    _NOW[0] = BASE + 26 * 3600                    # overdue AND past the 1h grace slot
     _as(module, STRANGER)                         # permissionless
     out = json.loads(c.forfeit_window(mid))
     assert out["ruling"] == "FORFEIT" and out["paid_wei"] == "0"
@@ -877,7 +902,7 @@ def test_forfeit_overdue_reclaims_window_for_client(module, c):
     assert updated["windows_done"] == 1
     assert updated["forfeits_count"] == 1
     assert updated["strikes"] == 1
-    assert int(updated["window_deadline_epoch"]) == BASE + 25 * 3600 + 24 * 3600
+    assert int(updated["window_deadline_epoch"]) == BASE + 26 * 3600 + 24 * 3600
     assert json.loads(c.get_operator_record(OPERATOR))["forfeits"] == 1
 
 
@@ -894,8 +919,8 @@ def test_all_windows_forfeited_slashes_bond_to_client(module, c):
     _NOW[0] = BASE
     m = _retain(module, c, total=2 * GEN, windows=2, interval=24)   # bond 0.4 GEN
     mid = m["mandate_id"]
-    _NOW[0] = BASE + 25 * 3600; _as(module, STRANGER); c.forfeit_window(mid)
-    _NOW[0] = BASE + 50 * 3600; _as(module, STRANGER)
+    _NOW[0] = BASE + 26 * 3600; _as(module, STRANGER); c.forfeit_window(mid)
+    _NOW[0] = BASE + 52 * 3600; _as(module, STRANGER)
     out = json.loads(c.forfeit_window(mid))
     updated = json.loads(c.get_mandate(mid))
     assert updated["status"] == "COMPLETED" and updated["forfeits_count"] == 2
@@ -946,11 +971,11 @@ def test_reputation_builds_and_discounts_the_bond(module, c):
 
 
 def test_revoke_cuts_reputation_to_zero(module, c):
+    _NOW[0] = BASE
     m = _retain(module, c)
     _review(module, c, m["mandate_id"], "RELEASE")       # +3
-    _review(module, c, m["mandate_id"], "REVOKE")        # arms
-    _retain(module, c, accept=False)                     # tick
-    _retain(module, c, accept=False)                     # tick
+    _review(module, c, m["mandate_id"], "REVOKE")        # arms on the clock
+    _NOW[0] = BASE + 6 * 3600 + 60
     _as(module, CLIENT); c.finalize_revoke(m["mandate_id"])
     rec = json.loads(c.get_operator_record(OPERATOR))
     assert rec["revokes"] == 1
@@ -969,3 +994,108 @@ def test_ranked_bench_orders_by_reputation(module, c):
     assert ranked[0]["operator"].lower() == OPERATOR.lower()   # higher reputation first
     assert ranked[0]["reputation"] > ranked[1]["reputation"]
     assert ranked[1]["operator"].lower() == OP2.lower()
+
+
+# ── v0.5 — the four judge-flagged edge cases ─────────────────────────────────
+
+def test_appeal_window_immune_to_unrelated_activity(module, c):
+    """The old action-counter design let ANY write shut the window. Hammer the
+    contract with strangers' writes; only TIME may close due process."""
+    _NOW[0] = BASE
+    m = _retain(module, c)
+    _review(module, c, m["mandate_id"], "REVOKE")
+    OP2 = "0xcccc555555555555555555555555555555555555"
+    _as(module, OP2)
+    c.register_operator("noise", "A stranger registering, loudly.", ["x"], str(GEN), [SURFACE])
+    _retain(module, c, total=GEN, windows=2, accept=False)
+    _propose(module, c)
+    _NOW[0] = BASE + 6 * 3600 - 60                        # 1 min short of the window
+    _as(module, CLIENT)
+    with pytest.raises(module.gl.vm.UserError, match="appeal window still open"):
+        c.finalize_revoke(m["mandate_id"])
+    _NOW[0] = BASE + 6 * 3600 + 1                         # ...and one minute later
+    _as(module, CLIENT)
+    assert json.loads(c.finalize_revoke(m["mandate_id"]))["status"] == "REVOKED"
+
+
+def test_appeal_judges_recorded_snapshot_not_live_pages(module, c):
+    """The appeal panel reads the hash-verified snapshot; the live surfaces are
+    inadmissible. Proven by killing the web entirely: a refetching appeal would
+    see UNREACHABLE surfaces — this one sees the original evidence."""
+    m = _retain(module, c)
+    digest = "Surface #1 carried both mandated posts, dated July 14, on-brief."
+    _EqPrinciple.canned = _verdict(ruling="WARN", evidence_digest=digest)
+    _as(module, OPERATOR)
+    rv = json.loads(c.review_window(m["mandate_id"]))
+    _NondetWeb.raise_all = True                           # every live fetch now fails
+    _appeal(module, c, rv["review_id"], "RELEASE",
+            note="The first panel misread the snapshot — both posts are in it.")
+    assert "IMMUTABLE EVIDENCE SNAPSHOT" in _EqPrinciple.last_prompt
+    assert digest in _EqPrinciple.last_prompt             # the panel read the RECORD
+    assert "UNREACHABLE" not in _EqPrinciple.last_prompt  # ...and never the live web
+    out = json.loads(c.get_review(rv["review_id"]))
+    assert out["appeal_outcome"] == "FLIPPED"
+
+
+def test_appeal_requires_an_evidence_snapshot(module, c):
+    """A review that recorded no snapshot (pre-v0.3, or a degraded panel) cannot
+    be appealed — there is nothing immutable for the second round to judge."""
+    m = _retain(module, c)
+    _EqPrinciple.canned = _verdict(ruling="WARN", evidence_digest="")
+    _as(module, OPERATOR)
+    rv = json.loads(c.review_window(m["mandate_id"]))
+    _as(module, OPERATOR, value=BOND)
+    with pytest.raises(module.gl.vm.UserError, match="no evidence snapshot"):
+        c.appeal_ruling(rv["review_id"], "Please re-read the surfaces once more.")
+
+
+def test_retain_from_offer_collects_bond_before_anything_is_judged(module, c):
+    """v0.5: funding an AGREED offer opens the mandate PROPOSED — the operator
+    bond is a separate economic act and no review runs until it is posted."""
+    o = _propose(module, c)
+    _as(module, OPERATOR)
+    o = json.loads(c.accept_offer(o["offer_id"]))
+    _as(module, CLIENT, value=4 * GEN)
+    m = json.loads(c.retain_from_offer(o["offer_id"]))
+    assert m["status"] == "PROPOSED" and m["operator_bond_wei"] == "0"
+    with pytest.raises(module.gl.vm.UserError, match="not accepted"):
+        _as(module, OPERATOR)
+        c.review_window(m["mandate_id"])
+    q = json.loads(c.quote_accept(m["mandate_id"]))
+    _as(module, OPERATOR, value=int(q["required_bond_wei"]))
+    m2 = json.loads(c.accept_mandate(m["mandate_id"]))
+    assert m2["status"] == "ACTIVE" and int(m2["operator_bond_wei"]) > 0
+    assert json.loads(c.get_stats())["bonds_held_wei"] == m2["operator_bond_wei"]
+
+
+def test_timed_review_locked_until_window_elapses(module, c):
+    """A timed window is judged AFTER its period exists. Without the gate the
+    operator could burn every window in a minute and drain the retainer."""
+    _NOW[0] = BASE
+    m = _retain(module, c, interval=24)
+    mid = m["mandate_id"]
+    _NOW[0] = BASE + 12 * 3600                            # mid-period
+    _as(module, OPERATOR)
+    with pytest.raises(module.gl.vm.UserError, match="still in progress"):
+        c.review_window(mid)
+    _NOW[0] = BASE + 24 * 3600 + 60                       # the period has elapsed
+    rv = _review(module, c, mid, "RELEASE")
+    assert rv["ruling"] == "RELEASE"
+    updated = json.loads(c.get_mandate(mid))
+    assert updated["windows_done"] == 1
+    assert int(updated["window_deadline_epoch"]) == BASE + 24 * 3600 + 24 * 3600
+
+
+def test_forfeit_grace_slot_lets_operator_review_first(module, c):
+    """Between window-elapse and elapse+grace the review runs and the forfeit
+    does not — the race between them has a defined winner."""
+    _NOW[0] = BASE
+    m = _retain(module, c, interval=24)
+    mid = m["mandate_id"]
+    _NOW[0] = BASE + 24 * 3600 + 30 * 60                  # inside the 1h grace slot
+    _as(module, STRANGER)
+    with pytest.raises(module.gl.vm.UserError, match="not forfeitable yet"):
+        c.forfeit_window(mid)
+    rv = _review(module, c, mid, "RELEASE")               # the operator claims it
+    assert rv["ruling"] == "RELEASE"
+    assert _GL._emit.total_to(OPERATOR) == GEN

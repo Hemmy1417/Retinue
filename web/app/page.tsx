@@ -137,7 +137,7 @@ export default function Registry() {
             <div className="spec-row"><span className="spec-key">Review windows</span><span className="spec-val">{stats ? `${stats.windows_range[0]}–${stats.windows_range[1]} per mandate` : "—"}</span></div>
             <div className="spec-row"><span className="spec-key">Minimum retainer</span><span className="spec-val">{stats ? `${genFromWei(stats.min_retainer_wei)} GEN` : "—"}</span></div>
             <div className="spec-row"><span className="spec-key">Appeal bond</span><span className="spec-val">{stats ? `${stats.appeal_bond_bps / 100}% of window · min ${genFromWei(stats.min_appeal_bond_wei)} GEN` : "—"}</span></div>
-            <div className="spec-row"><span className="spec-key">Revoke appeal window</span><span className="spec-val">{stats ? `${stats.appeal_window_actions} protocol actions` : "—"}</span></div>
+            <div className="spec-row"><span className="spec-key">Revoke appeal window</span><span className="spec-val">{stats ? `${stats.appeal_window_seconds / 3600}h wall-clock` : "—"}</span></div>
             <div className="spec-row"><span className="spec-key">Strikes to escalate</span><span className="spec-val">{stats ? String(stats.strikes_to_escalate) : "—"}</span></div>
             <div className="spec-row"><span className="spec-key">Returned to clients</span><span className="spec-val">{stats ? `${genFromWei(stats.refunded_wei)} GEN` : "—"}</span></div>
           </div>

@@ -116,8 +116,8 @@ never be coerced into an adverse `REVOKE`.
 | Chain ID | `61999` |
 | RPC | `https://studio.genlayer.com/api` |
 | Explorer | `https://explorer-studio.genlayer.com` |
-| Version | `v0.4.0` |
-| Contract address | [`0x5520a08eF6852C512f3E84c9674A74524262a929`](https://studio.genlayer.com/?import-contract=0x5520a08eF6852C512f3E84c9674A74524262a929) |
+| Version | `v0.5.0` |
+| Contract address | [`0x90B4cef072E45e978F6265aAFAC0C3Fd7C4062DE`](https://studio.genlayer.com/?import-contract=0x90B4cef072E45e978F6265aAFAC0C3Fd7C4062DE) |
 | Source | `contracts/retinue.py` |
 | Owner | None - no admin keys, no constructor arguments, no pooled funds |
 
@@ -171,6 +171,29 @@ never be coerced into an adverse `REVOKE`.
   recorded reading of what the surfaces showed that window (a factual fingerprint - not a hash of
   the raw page), plus a `sha256` of that digest so the stored record is tamper-evident. The evidence
   behind each ruling is on-chain and can't be quietly rewritten after the fact.
+
+### New in v0.5 - four correctness fixes from judge review
+
+1. **Wall-clock windows.** Appeal and cancel delays were counted in protocol
+   actions, so ANY unrelated write (a bench registration, a stranger's offer)
+   ticked an operator's due-process window shut. Both windows are now 6h of
+   wall-clock time from a two-source consensus clock, with a self-healing
+   anchor if the clock was down at arming.
+2. **Appeals judge the record, not the live web.** The second panel now reads
+   the immutable evidence snapshot the original panel recorded (integrity-
+   checked against its on-chain sha256) instead of refetching pages that may
+   have changed since the ruling. Both panels judge the same evidence, which
+   is the entire point of an appeal.
+3. **Negotiated mandates post the bond.** `retain_from_offer` previously
+   activated the mandate with `operator_bond_wei = 0`. It now opens PROPOSED
+   and goes live only when the operator accepts and posts the performance
+   bond - the same economics as a direct retainer.
+4. **Timed windows are judged after they exist.** On a timed cadence the
+   review unlocks only once the window's period has elapsed (no more burning
+   every window in a minute), and forfeit waits out a 1h grace slot so the
+   operator's due review and a keeper's forfeit never race.
+
+All four are covered in `tests/direct` (64 tests).
 
 ### New in v0.4 - reputation made load-bearing
 
@@ -228,7 +251,7 @@ refunded the remainder.
 ## Repository
 
 ```text
-contracts/retinue.py        The Intelligent Contract (v0.4.0, deployed)
+contracts/retinue.py        The Intelligent Contract (v0.5.0, deployed)
 tests/direct/               58 direct-mode tests, pytest
 web/                        Next.js frontend (bench, offers, mandates, mandate room, registry)
 ```

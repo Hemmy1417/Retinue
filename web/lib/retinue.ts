@@ -132,8 +132,9 @@ export type Stats = {
   windows_range: [number, number];
   appeal_bond_bps: number;
   min_appeal_bond_wei: string;
-  appeal_window_actions: number;
-  cancel_window_actions: number;
+  appeal_window_seconds: number;
+  cancel_window_seconds: number;
+  forfeit_grace_seconds: number;
   strikes_to_escalate: number;
   // v0.3
   bonds_held_wei: string;
